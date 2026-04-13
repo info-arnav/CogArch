@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussion Forum
+    url: https://github.com/info-arnav/CogArch/discussions
+    about: Ask questions and discuss ideas
+  - name: Architecture Spec
+    url: https://github.com/info-arnav/CogArch/blob/main/PARALLEL_COGNITIVE_ARCHITECTURE_SPEC.md
+    about: Read the complete architecture specification

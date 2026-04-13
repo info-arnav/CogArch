@@ -1,0 +1,101 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cogarch"
+version = "0.1.0"
+description = "Parallel Cognitive Architecture for Machine Consciousness"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Arnav Gupta", email = "arnav@arnav.org"}
+]
+keywords = ["ai", "llm", "cognitive-architecture", "machine-consciousness", "multi-agent"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "pydantic>=2.5.0",
+    "pyyaml>=6.0",
+    "httpx>=0.26.0",
+    "rich>=13.7.0",
+    "typer>=0.9.0",
+    "fastapi>=0.109.0",
+    "uvicorn>=0.27.0",
+]
+
+[project.optional-dependencies]
+training = [
+    "torch>=2.1.0",
+    "transformers>=4.38.0",
+    "peft>=0.8.0",
+    "accelerate>=0.27.0",
+    "datasets>=2.17.0",
+    "scikit-learn>=1.4.0",
+]
+backends = [
+    "vllm>=0.3.0",
+    "anthropic>=0.18.0",
+    "openai>=1.12.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "black>=24.1.0",
+    "ruff>=0.2.0",
+    "mypy>=1.8.0",
+]
+all = [
+    "cogarch[training,backends,dev]",
+]
+
+[project.urls]
+Homepage = "https://github.com/info-arnav/CogArch"
+Repository = "https://github.com/info-arnav/CogArch"
+Issues = "https://github.com/info-arnav/CogArch/issues"
+
+[project.scripts]
+cogarch = "cli.main:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*", "cli*"]
+
+[tool.black]
+line-length = 88
+target-version = ["py310", "py311"]
+include = '\.pyi?$'
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "gpu: marks tests requiring GPU",
+]

@@ -1,0 +1,57 @@
+# CogArch Default Configuration
+
+# ── Model Configuration ──
+coordinator:
+  model_id: "gpt-4o-mini"
+  backend: "openai"
+  max_tokens: 1024
+  temperature: 0.3
+
+specialists:
+  enabled: ["logical", "creative", "skeptical"]
+  default_model_id: "gpt-4o"
+  default_backend: "openai"
+  max_tokens: 2048
+
+# ── Inference ──
+inference:
+  enable_revision_pass: true
+  revision_max_tokens: 512
+  parallel_backend: "asyncio"
+
+# ── Self-State ──
+self_state:
+  focus_vector_dim: 128
+  routing_history_length: 20
+  initial_uncertainty: 0.5
+
+# ── Experience Log ──
+experience_log:
+  storage: "jsonl"
+  path: "data/experience_log/"
+  max_size_mb: 500
+
+# ── Sleep Cycle ──
+sleep_cycle:
+  trigger: "manual"
+  trigger_after_n_rounds: 50
+  curation:
+    max_items: 200
+    vindication_weight: 3
+    disagreement_weight: 2
+    loss_weight: 3
+  fine_tuning:
+    method: "lora"
+    lora_r: 16
+    lora_alpha: 32
+    lora_dropout: 0.05
+    winner_epochs: 3
+    loser_epochs: 1
+    learning_rate: 2e-4
+    batch_size: 4
+
+# ── Competitive Training ──
+competitive:
+  rounds_per_session: 50
+  benchmark: "arc-agi"
+  sleep_after_session: true

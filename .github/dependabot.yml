@@ -1,0 +1,11 @@
+version = 1
+update-configs = ["pip_compile"]
+
+[[package]]
+source = "pypi"
+version-updates = "all"
+
+update-schedule = "weekly"
+
+[pip_compile]
+generate-hashes = false
