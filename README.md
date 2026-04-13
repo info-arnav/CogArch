@@ -66,59 +66,111 @@ cp .env.example .env
 
 ## Architecture Overview
 
+### Inference Pipeline
+
+```mermaid
+graph TD
+    Input[Input Query] --> Broadcast{Orchestrator}
+    
+    Broadcast -->|Round 1| L[Logical Specialist<br/>Analytical reasoning]
+    Broadcast -->|Round 1| C[Creative Specialist<br/>Novel approaches]
+    Broadcast -->|Round 1| S[Skeptical Specialist<br/>Critical analysis]
+    Broadcast -->|Round 1| E[Empathetic Specialist<br/>Human-centered view]
+    
+    L --> Share[Share All Outputs]
+    C --> Share
+    S --> Share
+    E --> Share
+    
+    Share -->|Round 2| L2[Logical<br/>Revise answer]
+    Share -->|Round 2| C2[Creative<br/>Revise answer]
+    Share -->|Round 2| S2[Skeptical<br/>Revise answer]
+    Share -->|Round 2| E2[Empathetic<br/>Revise answer]
+    
+    L2 --> Coord[Coordinator<br/>Small Model]
+    C2 --> Coord
+    S2 --> Coord
+    E2 --> Coord
+    
+    Coord --> Output[Final Answer<br/>+ Attribution<br/>+ Self-State]
+    
+    style Input fill:#e1f5ff
+    style Output fill:#d4edda
+    style Coord fill:#fff3cd
+    style Share fill:#f8f9fa
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      INPUT QUERY                         │
-└──────────────────┬──────────────────────────────────────┘
-                   │
-    ┌──────────────┼──────────────┬──────────────┐
-    ▼              ▼              ▼              ▼
-┌─────────┐  ┌──────────┐  ┌───────────┐  ┌────────────┐
-│Logical  │  │Creative  │  │Skeptical  │  │Empathetic  │
-│Specialist│  │Specialist│  │Specialist │  │Specialist  │
-└────┬────┘  └────┬─────┘  └─────┬─────┘  └──────┬─────┘
-     │            │              │               │
-     │   Round 1: Independent Reasoning          │
-     │            │              │               │
-     └────────────┴──────┬───────┴───────────────┘
-                         │
-              ┌──────────▼──────────┐
-              │   Share Outputs     │
-              └──────────┬──────────┘
-                         │
-    ┌──────────────┬─────┴─────┬──────────────┐
-    ▼              ▼           ▼              ▼
-┌─────────┐  ┌──────────┐  ┌───────────┐  ┌────────────┐
-│Revise   │  │Revise    │  │Revise     │  │Revise      │
-│Endorse  │  │Challenge │  │Maintain   │  │Endorse     │
-└────┬────┘  └────┬─────┘  └─────┬─────┘  └──────┬─────┘
-     │            │              │               │
-     │   Round 2: Revision & Deliberation        │
-     │            │              │               │
-     └────────────┴──────┬───────┴───────────────┘
-                         │
-                         ▼
-              ┌──────────────────┐
-              │   Coordinator    │
-              │  (Small Model)   │
-              │   Synthesizes    │
-              │   + Attributes   │
-              └────────┬─────────┘
-                       │
-                       ▼
-              ┌────────────────┐
-              │  Final Answer  │
-              │  + Attribution │
-              │  + Self-State  │
-              └────────────────┘
+
+### Competitive Learning
+
+```mermaid
+sequenceDiagram
+    participant B as Benchmark
+    participant A as Agent A
+    participant C as Agent B
+    participant J as Judge
+    
+    B->>A: Same question
+    B->>C: Same question
+    
+    Note over A: Full inference<br/>(4 specialists + coordinator)
+    Note over C: Full inference<br/>(4 specialists + coordinator)
+    
+    A->>J: Answer A + reasoning traces
+    C->>J: Answer B + reasoning traces
+    
+    J->>J: Score both against ground truth
+    
+    J->>A: Your score + opponent's reasoning
+    J->>C: Your score + opponent's reasoning
+    
+    Note over A,C: Both log interaction with cross-agent insights
+    
+    rect rgb(240, 248, 255)
+        Note over A,C: After N rounds: Sleep Cycle<br/>Winners teach, losers learn
+    end
+```
+
+### Wake/Sleep Cycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Awake: System Start
+    
+    Awake --> Inference: User Query
+    Inference --> Logging: Record interaction
+    Logging --> Inference: Continue
+    
+    Logging --> Asleep: Trigger<br/>(N interactions)
+    
+    state Asleep {
+        [*] --> Curate
+        Curate --> Assemble: High-signal<br/>interactions
+        Assemble --> FineTune: Per-specialist<br/>datasets
+        FineTune --> Validate: LoRA adapters
+        Validate --> [*]
+    }
+    
+    Asleep --> Awake: Updated specialists
+    
+    note right of Awake
+        Four specialists process in parallel
+        Coordinator synthesizes results
+        Experience logged to JSONL
+    end note
+    
+    note right of Asleep
+        Curator selects valuable interactions
+        Specialists fine-tuned on curated data
+        Vindication tracking adjusts weights
+    end note
 ```
 
 **Core Components:**
-- Specialists: Same base model, different personalities (defined in YAML configs + LoRA adapters)
-- Coordinator: Small model (1-3B params) that routes and synthesizes, not solves
-- Experience Log: JSONL append-only record of all interactions for training
-- Sleep Cycle: Curate, Assemble, Fine-tune, Validate loop
-- Competitive Training: Two agents compete, learn from each other's traces
+- **Specialists**: Same base model, different personalities (YAML configs + LoRA adapters)
+- **Coordinator**: Small model (1-3B params) that routes and synthesizes, not solves
+- **Experience Log**: JSONL append-only record of all interactions for training
+- **Sleep Cycle**: Curate → Assemble → Fine-tune → Validate loop
+- **Competitive Training**: Two agents compete, cross-learn from reasoning traces
 
 ---
 
