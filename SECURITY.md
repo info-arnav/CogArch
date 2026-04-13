@@ -28,9 +28,10 @@ We will acknowledge your report within 48 hours and aim to release a fix within 
 
 In scope:
 
-- The Vox Electron app
-- Published npm packages (`@vox-ai-app/*`)
-- Remote code execution, privilege escalation, or data exfiltration vectors
+- The CogArch Python library
+- CLI tools and training scripts
+- Data handling and experience log persistence
+- LLM API interaction security (API key exposure, prompt injection)
 
 Out of scope:
 
