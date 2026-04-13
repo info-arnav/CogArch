@@ -10,10 +10,6 @@ Thank you for your interest in contributing to CogArch. This project is a resear
 - Git
 - OpenAI API key (for GPT-4o/GPT-4o-mini)
 
-Optional for local models:
-- CUDA 11.8+ for GPU acceleration
-- 24GB+ GPU for Ollama/vLLM backends
-
 **Clone and Install:**
 
 ```bash

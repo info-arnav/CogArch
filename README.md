@@ -9,7 +9,7 @@
 
 A Python framework for machine consciousness through parallel specialist LLMs, competitive learning, and sleep-cycle fine-tuning.
 
-**Core concept:** A small coordinator model learns to orchestrate multiple larger specialist models, inspired by how the brain's prefrontal cortex coordinates specialized regions.
+**Core concept:** A smaller coordinator model (GPT-4o-mini) learns to orchestrate multiple larger specialist models (GPT-4o), inspired by how the brain's prefrontal cortex coordinates specialized regions.
 
 ---
 
@@ -166,8 +166,8 @@ stateDiagram-v2
 ```
 
 **Core Components:**
-- **Specialists**: Same base model, different personalities (YAML configs + LoRA adapters)
-- **Coordinator**: Small model (1-3B params) that routes and synthesizes, not solves
+- **Specialists**: Same base model (GPT-4o), different personalities (YAML configs + future LoRA adapters)
+- **Coordinator**: Smaller model (GPT-4o-mini) that routes and synthesizes, doesn't solve directly
 - **Experience Log**: JSONL append-only record of all interactions for training
 - **Sleep Cycle**: Curate → Assemble → Fine-tune → Validate loop
 - **Competitive Training**: Two agents compete, cross-learn from reasoning traces
@@ -180,28 +180,21 @@ stateDiagram-v2
 2. Inference and training fully separated - run inference with zero training dependencies
 3. Prompts are first-class citizens - versioned, testable, swappable
 4. Every data artifact has a clear home - structured data/ directory with schemas
-5. Pluggable backends - swap LLM providers (Ollama, vLLM, OpenAI, Anthropic) without changing logic
 
 ---
 
 ## Requirements
 
-**API-based (Default):**
+- Python 3.10+
 - OpenAI API key (GPT-4o for specialists, GPT-4o-mini for coordinator)
 - Approximately $0.01-0.05 per inference depending on input length
-- No GPU required
-- Fast parallel execution
-
-**Local models (Optional):**
-- 1x GPU with 24GB VRAM (RTX 4090) for Ollama/vLLM
-- 2-4x GPUs for parallel specialist execution
-- Free inference but higher upfront cost
+- No GPU required - runs entirely via OpenAI API
 
 ---
 
 ## Documentation
 
-- [Architecture Specification](PARALLEL_COGNITIVE_ARCHITECTURE_SPEC.md) - Complete build document
+- [Architecture Specification](docs/PARALLEL_COGNITIVE_ARCHITECTURE_SPEC.md) - Complete build document
 - [Contributing Guide](CONTRIBUTING.md) - How to contribute
 - [Code of Conduct](CODE_OF_CONDUCT.md) - Community standards
 - [Changelog](CHANGELOG.md) - Version history
@@ -213,9 +206,9 @@ stateDiagram-v2
 We welcome contributions. High-impact areas:
 
 - Core pipeline implementation (Phase 1: inference loop)
-- LLM backend adapters (support for more providers)
 - Benchmark integrations (ARC-AGI, FrontierMath, custom tasks)
 - Evaluation metrics (routing accuracy, vindication tracking)
+- Competitive training loop
 - Documentation and examples
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and development workflow.

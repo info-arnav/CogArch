@@ -6,7 +6,7 @@ help:
 	@echo "Setup:"
 	@echo "  make install       Install core dependencies"
 	@echo "  make install-dev   Install with dev dependencies"
-	@echo "  make install-all   Install everything (training + backends + dev)"
+	@echo "  make install-all   Install everything (training + dev)"
 	@echo ""
 	@echo "Development:"
 	@echo "  make test          Run all tests"
@@ -15,7 +15,6 @@ help:
 	@echo "  make clean         Remove build artifacts"
 	@echo ""
 	@echo "Usage:"
-	@echo "  make run-api       Start FastAPI server"
 	@echo "  make infer         Run inference (pass QUERY='...')"
 	@echo "  make compete       Run competitive training"
 	@echo "  make sleep         Run sleep cycle"
@@ -50,9 +49,6 @@ clean:
 	find . -type d -name __pycache__ -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
 	rm -rf .pytest_cache .mypy_cache .ruff_cache htmlcov/
-
-run-api:
-	uvicorn src.api.server:app --reload --host 0.0.0.0 --port 8080
 
 infer:
 	@if [ -z "$(QUERY)" ]; then \

@@ -3,14 +3,12 @@
 # ── Model Configuration ──
 coordinator:
   model_id: "gpt-4o-mini"
-  backend: "openai"
   max_tokens: 1024
   temperature: 0.3
 
 specialists:
   enabled: ["logical", "creative", "skeptical"]
-  default_model_id: "gpt-4o"
-  default_backend: "openai"
+  model_id: "gpt-4o"
   max_tokens: 2048
 
 # ── Inference ──
