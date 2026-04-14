@@ -39,20 +39,19 @@ Pre-alpha / Active Development
 **Implemented:**
 - Complete architecture specification
 - Project structure and configuration
-- Full Phase 1 inference pipeline
-- Specialist class with Round 1 + Round 2 revision pass
-- Coordinator synthesis with self-state tracking
-- Orchestrator with async parallel specialist execution
+- Phase 1: Full inference pipeline (specialists, coordinator, orchestrator)
+- Phase 2: Competitive training system (two agents compete on benchmarks)
+- Phase 3: Sleep cycle (curator, dataset builder, sleep report)
+- Phase 4: Evaluation (scorer, metrics tracker, benchmark loader)
 - OpenAI backend (GPT-4o specialists, GPT-4o-mini coordinator)
-- YAML-based specialist personality configs (logical, creative, skeptical, empathetic)
-- Coordinator prompt externalized to YAML
+- YAML-based specialist + coordinator prompt configs
 - Experience logging (JSONL append-only)
-- Typer CLI with Rich output formatting
+- CLI commands: `infer`, `compete`, `sleep`, `dashboard`
 
 **Next:**
-- Phase 2: Competitive training system
-- Phase 3: Sleep-cycle fine-tuning
-- Phase 4: Evaluation metrics and benchmarks
+- LoRA / OpenAI fine-tuning integration
+- Additional benchmark suites (ARC-AGI, FrontierMath, causal)
+- Metrics visualization and trend tracking
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how to help.
 
@@ -76,13 +75,19 @@ cp .env.example .env
 
 ```bash
 # Run inference on a query
-python -m cli.main "What causes ocean tides?"
+python -m cli.main infer "What causes ocean tides?"
 
 # Skip the revision pass (faster, Round 1 only)
-python -m cli.main "What is 2+2?" --no-revision
+python -m cli.main infer "What is 2+2?" --no-revision
 
-# Use a custom config
-python -m cli.main "Explain entropy" --config config/custom.yaml
+# Run a competitive session between two agent instances
+python -m cli.main compete data/benchmarks/sample.jsonl --rounds 3
+
+# Run a sleep cycle (curate interactions, build training datasets)
+python -m cli.main sleep
+
+# View metrics dashboard
+python -m cli.main dashboard
 ```
 
 ---

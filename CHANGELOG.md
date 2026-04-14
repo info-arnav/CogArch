@@ -10,6 +10,22 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Phase 2: Competitive training system
+  - CompetitiveTrainer: two agent instances compete on benchmark items
+  - JSONL benchmark loader with exact-match and fuzzy-match scoring
+  - Vindication tracking on competitive rounds
+  - Session summary with win/loss/tie stats
+- Phase 3: Sleep cycle system
+  - Curator: priority-scored selection of high-signal interactions
+  - DatasetBuilder: per-specialist training set assembly (win / learn_from_winner / vindicated signals)
+  - SleepCycle orchestrator: curate → build datasets → produce SleepReport
+- Phase 4: Evaluation infrastructure
+  - Scorer: exact_match, fuzzy_match, LLM-as-judge scoring methods
+  - MetricsTracker: routing accuracy, vindication rate, coordinator calibration (ECE), consensus quality
+  - Benchmark base class (ABC) for pluggable benchmark loaders
+  - BenchmarkItem, CompetitiveResult, TrainingExample, SleepReport data models
+- CLI commands: `compete`, `sleep`, `dashboard`
+- Sample benchmark file (data/benchmarks/sample.jsonl)
 - Full Phase 1 inference pipeline
   - Specialist class with Round 1 (independent) and Round 2 (revision) reasoning
   - Coordinator class with synthesis prompt and self-state tracking

@@ -1,1 +1,1 @@
-"""Training components - sleep cycle, curator, fine-tuner, competitive learning."""
+"""Training components - competitive learning, curator, dataset builder, sleep cycle."""

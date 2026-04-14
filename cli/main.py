@@ -130,5 +130,209 @@ def infer(
     asyncio.run(_run())
 
 
+@app.command()
+def compete(
+    benchmark_path: str = typer.Argument(..., help="Path to benchmark JSONL file"),
+    rounds: int = typer.Option(
+        50, "--rounds", "-n", help="Number of competitive rounds"
+    ),
+    config_path: str = typer.Option(
+        "config/default.yaml", "--config", "-c", help="Path to config file"
+    ),
+) -> None:
+    """Run a competitive session between two agent instances."""
+    load_dotenv()
+
+    import asyncio
+
+    from rich.console import Console
+    from rich.table import Table
+
+    from src.config import load_all_specialist_configs, load_config
+    from src.eval.benchmarks.jsonl_benchmark import JsonlBenchmark
+    from src.eval.scorer import Scorer
+    from src.inference.backends.openai import OpenAIBackend
+    from src.inference.coordinator import Coordinator
+    from src.inference.orchestrator import Orchestrator
+    from src.inference.specialist import Specialist
+    from src.memory.experience_log import ExperienceLog
+
+    console = Console()
+
+    def _build_orchestrator(cfg: dict, backend: OpenAIBackend) -> Orchestrator:
+        specialist_names = cfg["specialists"]["enabled"]
+        specialist_configs = load_all_specialist_configs(specialist_names)
+        default_model = cfg["specialists"]["model_id"]
+        specialists = {
+            name: Specialist(config, backend, default_model)
+            for name, config in specialist_configs.items()
+        }
+        coordinator = Coordinator(
+            model=cfg["coordinator"]["model_id"],
+            backend=backend,
+            temperature=cfg["coordinator"]["temperature"],
+            max_tokens=cfg["coordinator"]["max_tokens"],
+        )
+        return Orchestrator(
+            specialists=specialists,
+            coordinator=coordinator,
+            enable_revision=cfg["inference"]["enable_revision_pass"],
+        )
+
+    async def _run() -> None:
+        from src.training.competitive import CompetitiveTrainer
+
+        cfg = load_config(config_path)
+        backend = OpenAIBackend()
+        agent_a = _build_orchestrator(cfg, backend)
+        agent_b = _build_orchestrator(cfg, backend)
+
+        benchmark = JsonlBenchmark(path=benchmark_path)
+        scorer = Scorer(backend=backend)
+        log = ExperienceLog(cfg["experience_log"]["path"])
+
+        trainer = CompetitiveTrainer(
+            agent_a=agent_a,
+            agent_b=agent_b,
+            benchmark=benchmark,
+            scorer=scorer,
+            experience_log=log,
+        )
+
+        console.print("\n[bold]Competitive Session[/bold]")
+        console.print(f"[dim]Benchmark: {benchmark_path}[/dim]")
+        console.print(f"[dim]Rounds: {rounds}[/dim]\n")
+
+        with console.status("[bold green]Running competitive rounds..."):
+            results = await trainer.run_session(num_rounds=rounds)
+
+        summary = trainer.session_summary(results)
+
+        table = Table(title="Competitive Session Results")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", justify="right")
+        for key, val in summary.items():
+            table.add_row(key.replace("_", " ").title(), str(val))
+        console.print(table)
+        console.print(f"\n[dim]Interactions logged: {log.count()}[/dim]")
+
+    asyncio.run(_run())
+
+
+@app.command()
+def sleep(
+    config_path: str = typer.Option(
+        "config/default.yaml", "--config", "-c", help="Path to config file"
+    ),
+) -> None:
+    """Run a sleep cycle: curate interactions and build training datasets."""
+    load_dotenv()
+
+    from rich.console import Console
+    from rich.table import Table
+
+    from src.config import load_config
+    from src.eval.metrics import MetricsTracker
+    from src.memory.experience_log import ExperienceLog
+    from src.training.curator import Curator
+    from src.training.dataset_builder import DatasetBuilder
+    from src.training.sleep_cycle import SleepCycle
+
+    console = Console()
+    cfg = load_config(config_path)
+    sc_cfg = cfg.get("sleep_cycle", {})
+    cur_cfg = sc_cfg.get("curation", {})
+
+    log = ExperienceLog(cfg["experience_log"]["path"])
+    curator = Curator(
+        max_items=cur_cfg.get("max_items", 200),
+        vindication_weight=cur_cfg.get("vindication_weight", 3),
+        disagreement_weight=cur_cfg.get("disagreement_weight", 2),
+        loss_weight=cur_cfg.get("loss_weight", 3),
+    )
+    builder = DatasetBuilder()
+    metrics = MetricsTracker()
+
+    cycle = SleepCycle(
+        experience_log=log,
+        curator=curator,
+        dataset_builder=builder,
+        metrics_tracker=metrics,
+    )
+
+    console.print("\n[bold]Sleep Cycle[/bold]\n")
+
+    with console.status("[bold green]Curating and building datasets..."):
+        report = cycle.run()
+
+    table = Table(title="Sleep Report")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", justify="right")
+    table.add_row("Cycle", str(report.sleep_cycle_num))
+    table.add_row("Items curated", str(report.items_curated))
+    table.add_row("Training examples", str(report.training_examples_generated))
+    table.add_row("Vindication cases", str(report.vindication_cases_found))
+    table.add_row("Routing accuracy", f"{report.routing_accuracy_before:.2f}")
+    table.add_row("Status", report.status)
+    console.print(table)
+
+    if report.checkpoints_saved:
+        console.print("\n[dim]Datasets saved:[/dim]")
+        for p in report.checkpoints_saved:
+            console.print(f"  {p}")
+    console.print()
+
+
+@app.command()
+def dashboard(
+    config_path: str = typer.Option(
+        "config/default.yaml", "--config", "-c", help="Path to config file"
+    ),
+) -> None:
+    """Show metrics dashboard from logged interactions."""
+    load_dotenv()
+
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+
+    from src.config import load_config
+    from src.eval.metrics import MetricsTracker
+    from src.memory.experience_log import ExperienceLog
+
+    console = Console()
+    cfg = load_config(config_path)
+
+    log = ExperienceLog(cfg["experience_log"]["path"])
+    tracker = MetricsTracker()
+
+    records = log.read_all()
+    if not records:
+        console.print("[yellow]No interactions logged yet.[/yellow]")
+        raise typer.Exit()
+
+    metrics = tracker.compute_all(records)
+
+    console.print(Panel("[bold]CogArch Metrics Dashboard[/bold]", border_style="blue"))
+
+    table = Table(title="System Metrics")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", justify="right")
+    table.add_row("Total interactions", str(metrics["total_interactions"]))
+    table.add_row("Routing accuracy", f"{metrics['routing_accuracy']:.2f}")
+    table.add_row("Vindication rate", f"{metrics['vindication_rate']:.2f}")
+    table.add_row("Calibration (ECE)", f"{metrics['coordinator_calibration_ece']:.3f}")
+    console.print(table)
+
+    cq = metrics["consensus_quality"]
+    table2 = Table(title="Consensus Quality")
+    table2.add_column("Metric", style="cyan")
+    table2.add_column("Value", justify="right")
+    table2.add_row("Agreement rate", f"{cq['agreement_rate']:.2f}")
+    table2.add_row("Revision rate", f"{cq['revision_rate']:.2f}")
+    table2.add_row("Improvement rate", f"{cq['improvement_rate']:.2f}")
+    console.print(table2)
+
+
 if __name__ == "__main__":
     app()

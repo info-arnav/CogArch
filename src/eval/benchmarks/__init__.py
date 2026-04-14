@@ -1,1 +1,1 @@
-"""Benchmark loaders - ARC-AGI, FrontierMath, causal reasoning."""
+"""Benchmark loaders - JSONL, ARC-AGI, FrontierMath, causal reasoning."""
