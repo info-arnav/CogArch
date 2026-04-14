@@ -11,6 +11,8 @@ A Python framework for machine consciousness through parallel specialist LLMs, c
 
 **Core concept:** A smaller coordinator model (GPT-4o-mini) learns to orchestrate multiple larger specialist models (GPT-4o), inspired by how the brain's prefrontal cortex coordinates specialized regions.
 
+This project is somewhat vibe-coded and primarily exists to test the concept.
+
 ---
 
 ## What This Is
