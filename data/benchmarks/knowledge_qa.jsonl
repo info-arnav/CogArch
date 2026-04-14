@@ -1,0 +1,20 @@
+{"question": "Which planet in our solar system has the most moons?", "expected_answer": "Saturn", "category": "science", "difficulty": "medium"}
+{"question": "What is the chemical symbol for gold?", "expected_answer": "Au", "category": "science", "difficulty": "easy"}
+{"question": "In what year did the Berlin Wall fall?", "expected_answer": "1989", "category": "history", "difficulty": "easy"}
+{"question": "What is the smallest prime number?", "expected_answer": "2", "category": "math", "difficulty": "easy"}
+{"question": "Which organ in the human body produces insulin?", "expected_answer": "Pancreas", "category": "biology", "difficulty": "easy"}
+{"question": "What programming language was created by Guido van Rossum?", "expected_answer": "Python", "category": "technology", "difficulty": "easy"}
+{"question": "What is the hardest natural substance on Earth?", "expected_answer": "Diamond", "category": "science", "difficulty": "easy"}
+{"question": "What is the speed of light in a vacuum, approximately in km/s?", "expected_answer": "300000 km/s", "category": "physics", "difficulty": "medium"}
+{"question": "Who developed the theory of general relativity?", "expected_answer": "Albert Einstein", "category": "science", "difficulty": "easy"}
+{"question": "What is the largest ocean on Earth?", "expected_answer": "Pacific Ocean", "category": "geography", "difficulty": "easy"}
+{"question": "In binary, what is the decimal number 42?", "expected_answer": "101010", "category": "computer_science", "difficulty": "medium"}
+{"question": "What does DNA stand for?", "expected_answer": "Deoxyribonucleic acid", "category": "biology", "difficulty": "easy"}
+{"question": "Which element has the atomic number 1?", "expected_answer": "Hydrogen", "category": "chemistry", "difficulty": "easy"}
+{"question": "What is the time complexity of binary search?", "expected_answer": "O(log n)", "category": "computer_science", "difficulty": "medium"}
+{"question": "What is the capital of Australia?", "expected_answer": "Canberra", "category": "geography", "difficulty": "medium"}
+{"question": "What force keeps planets in orbit around the Sun?", "expected_answer": "Gravity", "category": "physics", "difficulty": "easy"}
+{"question": "What is the powerhouse of the cell?", "expected_answer": "Mitochondria", "category": "biology", "difficulty": "easy"}
+{"question": "How many bits are in a byte?", "expected_answer": "8", "category": "computer_science", "difficulty": "easy"}
+{"question": "What is Avogadro's number approximately?", "expected_answer": "6.022 x 10^23", "category": "chemistry", "difficulty": "medium"}
+{"question": "What is the longest river in the world?", "expected_answer": "Nile", "category": "geography", "difficulty": "medium"}

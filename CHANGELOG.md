@@ -10,6 +10,28 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- OpenAI fine-tuning integration
+  - FineTuner: prepares chat-format JSONL, uploads to OpenAI, creates/monitors fine-tuning jobs
+  - `--fine-tune` and `--wait` flags on `sleep` CLI command
+  - `finetune-status` CLI command to check job status and cycle manifests
+  - Minimum 10-example threshold per specialist before fine-tuning
+  - Job manifest saved per cycle at `data/checkpoints/finetune_cycle_N.json`
+- SleepReport now tracks `fine_tune_jobs` (list of OpenAI job IDs)
+- Full benchmark evaluation suite
+  - `bench` CLI command: runs pipeline against benchmark with per-item scoring table
+  - Supports exact_match, fuzzy_match, and llm_judge metrics
+  - Per-category breakdown in results
+  - 4 benchmark datasets (70 items total):
+    - `math_reasoning.jsonl` (20 items — arithmetic, algebra, geometry, probability)
+    - `causal_reasoning.jsonl` (15 items — confounders, Simpson's paradox, selection bias)
+    - `knowledge_qa.jsonl` (20 items — science, history, CS, geography)
+    - `logic_puzzles.jsonl` (15 items — patterns, riddles, trick questions, analogies)
+- Integration tests with mock LLM backend (16 tests)
+  - MockBackend and CorrectAnswerBackend in tests/conftest.py
+  - Full pipeline E2E: inference, competitive rounds, sleep cycle, benchmark evaluation
+  - Metrics computation from competitive data
+- Unit tests for fine-tuner (7 tests) and sleep cycle (6 tests)
+- Sleep cycle now supports 4 stages: curate → assemble → fine-tune → validate
 - Phase 2: Competitive training system
   - CompetitiveTrainer: two agent instances compete on benchmark items
   - JSONL benchmark loader with exact-match and fuzzy-match scoring

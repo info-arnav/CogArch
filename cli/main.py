@@ -224,8 +224,18 @@ def sleep(
     config_path: str = typer.Option(
         "config/default.yaml", "--config", "-c", help="Path to config file"
     ),
+    fine_tune: bool = typer.Option(
+        False,
+        "--fine-tune",
+        help="Submit OpenAI fine-tuning jobs after dataset assembly",
+    ),
+    wait: bool = typer.Option(
+        False,
+        "--wait",
+        help="Block until fine-tuning jobs complete (use with --fine-tune)",
+    ),
 ) -> None:
-    """Run a sleep cycle: curate interactions and build training datasets."""
+    """Run a sleep cycle: curate interactions, build datasets, optionally fine-tune."""
     load_dotenv()
 
     from rich.console import Console
@@ -236,12 +246,14 @@ def sleep(
     from src.memory.experience_log import ExperienceLog
     from src.training.curator import Curator
     from src.training.dataset_builder import DatasetBuilder
+    from src.training.fine_tuner import FineTuner
     from src.training.sleep_cycle import SleepCycle
 
     console = Console()
     cfg = load_config(config_path)
     sc_cfg = cfg.get("sleep_cycle", {})
     cur_cfg = sc_cfg.get("curation", {})
+    ft_cfg = sc_cfg.get("fine_tuning", {})
 
     log = ExperienceLog(cfg["experience_log"]["path"])
     curator = Curator(
@@ -253,17 +265,29 @@ def sleep(
     builder = DatasetBuilder()
     metrics = MetricsTracker()
 
+    tuner: FineTuner | None = None
+    if fine_tune:
+        tuner = FineTuner(
+            base_model=ft_cfg.get("base_model", "gpt-4o-mini-2024-07-18"),
+            n_epochs=ft_cfg.get("n_epochs", ft_cfg.get("winner_epochs", 3)),
+        )
+
     cycle = SleepCycle(
         experience_log=log,
         curator=curator,
         dataset_builder=builder,
         metrics_tracker=metrics,
+        fine_tuner=tuner,
     )
 
     console.print("\n[bold]Sleep Cycle[/bold]\n")
 
-    with console.status("[bold green]Curating and building datasets..."):
-        report = cycle.run()
+    status_msg = "[bold green]Curating and building datasets..."
+    if fine_tune:
+        status_msg = "[bold green]Curating, building datasets, and fine-tuning..."
+
+    with console.status(status_msg):
+        report = cycle.run(fine_tune=fine_tune, wait=wait)
 
     table = Table(title="Sleep Report")
     table.add_column("Metric", style="cyan")
@@ -276,8 +300,13 @@ def sleep(
     table.add_row("Status", report.status)
     console.print(table)
 
+    if report.fine_tune_jobs:
+        console.print("\n[dim]Fine-tuning jobs:[/dim]")
+        for job_id in report.fine_tune_jobs:
+            console.print(f"  {job_id}")
+
     if report.checkpoints_saved:
-        console.print("\n[dim]Datasets saved:[/dim]")
+        console.print("\n[dim]Datasets/checkpoints saved:[/dim]")
         for p in report.checkpoints_saved:
             console.print(f"  {p}")
     console.print()
@@ -332,6 +361,211 @@ def dashboard(
     table2.add_row("Revision rate", f"{cq['revision_rate']:.2f}")
     table2.add_row("Improvement rate", f"{cq['improvement_rate']:.2f}")
     console.print(table2)
+
+
+@app.command()
+def bench(
+    benchmark_path: str = typer.Argument(..., help="Path to benchmark JSONL file"),
+    metric: str = typer.Option(
+        "fuzzy_match",
+        "--metric",
+        "-m",
+        help="Scoring metric: exact_match, fuzzy_match, or llm_judge",
+    ),
+    config_path: str = typer.Option(
+        "config/default.yaml", "--config", "-c", help="Path to config file"
+    ),
+) -> None:
+    """Run a benchmark evaluation suite against the full pipeline."""
+    load_dotenv()
+
+    import asyncio
+
+    from rich.console import Console
+    from rich.table import Table
+
+    from src.config import load_all_specialist_configs, load_config
+    from src.eval.benchmarks.jsonl_benchmark import JsonlBenchmark
+    from src.eval.scorer import Scorer
+    from src.inference.backends.openai import OpenAIBackend
+    from src.inference.coordinator import Coordinator
+    from src.inference.orchestrator import Orchestrator
+    from src.inference.specialist import Specialist
+
+    console = Console()
+
+    async def _run() -> None:
+        cfg = load_config(config_path)
+        backend = OpenAIBackend()
+
+        specialist_names = cfg["specialists"]["enabled"]
+        specialist_configs = load_all_specialist_configs(specialist_names)
+        default_model = cfg["specialists"]["model_id"]
+        specialists = {
+            name: Specialist(config, backend, default_model)
+            for name, config in specialist_configs.items()
+        }
+        coordinator = Coordinator(
+            model=cfg["coordinator"]["model_id"],
+            backend=backend,
+            temperature=cfg["coordinator"]["temperature"],
+            max_tokens=cfg["coordinator"]["max_tokens"],
+        )
+        orchestrator = Orchestrator(
+            specialists=specialists,
+            coordinator=coordinator,
+            enable_revision=cfg["inference"]["enable_revision_pass"],
+        )
+
+        benchmark = JsonlBenchmark(path=benchmark_path, metric=metric)
+        scorer = Scorer(backend=backend)
+        items = await benchmark.load()
+
+        if not items:
+            console.print("[yellow]No benchmark items found.[/yellow]")
+            raise typer.Exit()
+
+        console.print(f"\n[bold]Benchmark: {benchmark.name}[/bold]")
+        console.print(f"[dim]{len(items)} items · metric: {metric}[/dim]\n")
+
+        results: list[dict] = []
+        correct = 0
+        total_score = 0.0
+
+        for i, item in enumerate(items):
+            with console.status(f"[bold green]Running item {i + 1}/{len(items)}..."):
+                result = await orchestrator.run(item.question)
+
+            if metric == "llm_judge":
+                score = await scorer.llm_as_judge(
+                    item.question, result.answer, item.expected_answer
+                )
+            elif metric == "fuzzy_match":
+                score = scorer.fuzzy_match(result.answer, item.expected_answer)
+            else:
+                score = scorer.exact_match(result.answer, item.expected_answer)
+
+            total_score += score
+            if score >= 0.5:
+                correct += 1
+
+            results.append(
+                {
+                    "question": item.question[:60],
+                    "expected": item.expected_answer[:30],
+                    "predicted": result.answer[:30],
+                    "score": score,
+                    "primary": result.coordinator_output.primary_specialist,
+                    "category": item.category,
+                }
+            )
+
+        # Results table
+        table = Table(title="Benchmark Results")
+        table.add_column("#", justify="right", style="dim")
+        table.add_column("Question", style="white", max_width=50)
+        table.add_column("Expected", style="green")
+        table.add_column("Predicted", style="yellow")
+        table.add_column("Score", justify="right")
+        table.add_column("Primary", style="cyan")
+
+        for i, r in enumerate(results):
+            score_style = "green" if r["score"] >= 0.5 else "red"
+            table.add_row(
+                str(i + 1),
+                r["question"],
+                r["expected"],
+                r["predicted"],
+                f"[{score_style}]{r['score']:.2f}[/{score_style}]",
+                r["primary"],
+            )
+        console.print(table)
+
+        # Summary
+        avg_score = total_score / len(items)
+        console.print(f"\n[bold]Accuracy:[/bold] {correct}/{len(items)}")
+        console.print(f"[bold]Average score:[/bold] {avg_score:.3f}")
+
+        # Per-category breakdown if categories exist
+        categories = {r["category"] for r in results if r["category"]}
+        if categories:
+            cat_table = Table(title="Per-Category Breakdown")
+            cat_table.add_column("Category", style="cyan")
+            cat_table.add_column("Items", justify="right")
+            cat_table.add_column("Avg Score", justify="right")
+            for cat in sorted(categories):
+                cat_items = [r for r in results if r["category"] == cat]
+                cat_avg = sum(r["score"] for r in cat_items) / len(cat_items)
+                cat_table.add_row(cat, str(len(cat_items)), f"{cat_avg:.3f}")
+            console.print(cat_table)
+
+    asyncio.run(_run())
+
+
+@app.command(name="finetune-status")
+def finetune_status(
+    job_id: str = typer.Argument("", help="Specific job ID to check (optional)"),
+    cycle: int = typer.Option(
+        0, "--cycle", help="Show jobs from a specific sleep cycle manifest"
+    ),
+) -> None:
+    """Check the status of OpenAI fine-tuning jobs."""
+    load_dotenv()
+
+    import json
+
+    from rich.console import Console
+    from rich.table import Table
+
+    from src.training.fine_tuner import FineTuner
+
+    console = Console()
+    tuner = FineTuner()
+
+    if job_id:
+        status = tuner.get_job_status(job_id)
+        table = Table(title=f"Fine-tuning Job: {job_id}")
+        table.add_column("Field", style="cyan")
+        table.add_column("Value")
+        for key, val in status.items():
+            table.add_row(key, str(val) if val is not None else "-")
+        console.print(table)
+    elif cycle > 0:
+        manifest_path = tuner.output_dir / f"finetune_cycle_{cycle}.json"
+        if not manifest_path.exists():
+            console.print(f"[yellow]No manifest found for cycle {cycle}[/yellow]")
+            raise typer.Exit()
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+
+        table = Table(title=f"Cycle {cycle} Fine-tuning Jobs")
+        table.add_column("Specialist", style="cyan")
+        table.add_column("Job ID")
+        table.add_column("Status")
+        table.add_column("Examples", justify="right")
+        table.add_column("Fine-tuned Model")
+
+        for job in manifest.get("jobs", []):
+            if "job_id" in job:
+                live_status = tuner.get_job_status(job["job_id"])
+                table.add_row(
+                    job.get("specialist", ""),
+                    job["job_id"],
+                    live_status.get("status", ""),
+                    str(job.get("num_examples", "")),
+                    live_status.get("fine_tuned_model") or "-",
+                )
+            else:
+                table.add_row(
+                    job.get("specialist", ""),
+                    "-",
+                    job.get("status", ""),
+                    str(job.get("num_examples", job.get("reason", ""))),
+                    "-",
+                )
+        console.print(table)
+    else:
+        console.print("[yellow]Provide a --cycle number or job ID argument.[/yellow]")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,20 @@
+{"question": "If a train travels at 60 mph for 2.5 hours, how far does it travel?", "expected_answer": "150 miles", "category": "arithmetic", "difficulty": "easy"}
+{"question": "A store sells apples for $1.50 each. If you buy 8 apples and pay with a $20 bill, how much change do you get?", "expected_answer": "$8.00", "category": "arithmetic", "difficulty": "easy"}
+{"question": "What is 15% of 240?", "expected_answer": "36", "category": "arithmetic", "difficulty": "easy"}
+{"question": "A rectangular garden is 12 meters long and 8 meters wide. What is its perimeter?", "expected_answer": "40 meters", "category": "geometry", "difficulty": "easy"}
+{"question": "If x + 7 = 15, what is x?", "expected_answer": "8", "category": "algebra", "difficulty": "easy"}
+{"question": "A car uses 8 liters of fuel per 100 km. How many liters are needed for a 350 km trip?", "expected_answer": "28 liters", "category": "arithmetic", "difficulty": "medium"}
+{"question": "Three friends split a $87 restaurant bill equally. How much does each person pay?", "expected_answer": "$29", "category": "arithmetic", "difficulty": "easy"}
+{"question": "A shirt originally costs $60 and is on sale for 25% off. What is the sale price?", "expected_answer": "$45", "category": "arithmetic", "difficulty": "easy"}
+{"question": "If a baker makes 144 cookies and packs them in boxes of 12, how many boxes does he need?", "expected_answer": "12 boxes", "category": "arithmetic", "difficulty": "easy"}
+{"question": "A ladder is leaning against a wall. The base is 6 feet from the wall and the ladder is 10 feet long. How high up the wall does the ladder reach?", "expected_answer": "8 feet", "category": "geometry", "difficulty": "medium"}
+{"question": "A water tank fills at 3 gallons per minute. How long does it take to fill a 45-gallon tank?", "expected_answer": "15 minutes", "category": "arithmetic", "difficulty": "easy"}
+{"question": "What is the sum of the interior angles of a pentagon?", "expected_answer": "540 degrees", "category": "geometry", "difficulty": "medium"}
+{"question": "A population of bacteria doubles every 4 hours. If you start with 500, how many will there be after 12 hours?", "expected_answer": "4000", "category": "exponential", "difficulty": "medium"}
+{"question": "Solve for y: 3y - 9 = 18", "expected_answer": "9", "category": "algebra", "difficulty": "easy"}
+{"question": "A circular pizza has a diameter of 14 inches. What is its approximate area? Use pi = 3.14.", "expected_answer": "153.86 square inches", "category": "geometry", "difficulty": "medium"}
+{"question": "If you invest $1000 at 5% simple interest per year, how much interest do you earn in 3 years?", "expected_answer": "$150", "category": "finance", "difficulty": "medium"}
+{"question": "A train leaves Station A at 9:00 AM traveling at 80 km/h. Another train leaves Station B (400 km away) at 9:00 AM traveling toward Station A at 120 km/h. At what time do they meet?", "expected_answer": "11:00 AM", "category": "algebra", "difficulty": "hard"}
+{"question": "What is the probability of rolling a sum of 7 with two fair six-sided dice?", "expected_answer": "1/6", "category": "probability", "difficulty": "medium"}
+{"question": "A cone has a radius of 3 cm and a height of 4 cm. What is its slant height?", "expected_answer": "5 cm", "category": "geometry", "difficulty": "medium"}
+{"question": "If f(x) = 2x^2 - 3x + 1, what is f(4)?", "expected_answer": "21", "category": "algebra", "difficulty": "medium"}
