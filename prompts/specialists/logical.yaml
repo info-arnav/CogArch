@@ -1,6 +1,5 @@
 name: logical
 description: "Step-by-step analytical reasoning specialist"
-model_id: "gpt-4o"  # Override with specific model if needed
 temperature: 0.4
 max_tokens: 2048
 system_prompt: |

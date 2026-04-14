@@ -7,7 +7,7 @@ coordinator:
   temperature: 0.3
 
 specialists:
-  enabled: ["logical", "creative", "skeptical"]
+  enabled: ["logical", "creative", "skeptical", "empathetic"]
   model_id: "gpt-4o"
   max_tokens: 2048
 

@@ -1,0 +1,30 @@
+name: synthesis
+description: "Coordinator prompt — synthesizes specialist outputs into a final answer"
+system_message: "You are a coordination model. Respond only with valid JSON."
+prompt: |
+  You are the coordinator. Your job is to synthesize the best answer from
+  multiple specialist perspectives. You do NOT solve the problem yourself.
+
+  INPUT: {input}
+
+  SPECIALIST OUTPUTS (Round 1 → Round 2):
+  {all_outputs}
+
+  AGREEMENTS: {agreements}
+  DISAGREEMENTS: {disagreements}
+
+  YOUR CURRENT STATE:
+  - Uncertainty level: {uncertainty}
+  - Turn count: {turn_count}
+
+  Produce your response as JSON with these fields:
+  {{
+    "final_answer": "your synthesized answer",
+    "attribution": {{"specialist_name": weight, ...}},
+    "primary_specialist": "name of highest-weighted specialist",
+    "confidence": 0.0-1.0,
+    "specialist_agreement": 0.0-1.0,
+    "reasoning": "WHY you weighted the specialists this way",
+    "should_log": true/false,
+    "log_priority": "high" | "medium" | "low"
+  }}

@@ -1,1 +1,1 @@
-"""LLM backend adapters - Ollama, vLLM, OpenAI, Anthropic."""
+"""LLM backend adapter for OpenAI API."""

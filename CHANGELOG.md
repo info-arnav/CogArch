@@ -10,16 +10,29 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
-- Initial project structure and folder hierarchy
-- Complete architecture specification document
-- Configuration system (YAML-based)
-- Specialist personality configs (logical, creative, skeptical)
-- Python package setup (pyproject.toml, requirements.txt)
-- Development tooling (Makefile, .gitignore, .env.example)
-- Pre-commit hooks for code quality
-- GitHub workflows (CI, lint, greet)
-- Issue and PR templates
-- Basic documentation (README, CONTRIBUTING, CODE_OF_CONDUCT)
+- Full Phase 1 inference pipeline
+  - Specialist class with Round 1 (independent) and Round 2 (revision) reasoning
+  - Coordinator class with synthesis prompt and self-state tracking
+  - Orchestrator tying specialists and coordinator together with asyncio
+  - OpenAI backend (AsyncOpenAI adapter for GPT-4o / GPT-4o-mini)
+  - YAML-based specialist personality configs (logical, creative, skeptical, empathetic)
+  - Coordinator synthesis prompt externalized to prompts/coordinator/synthesis.yaml
+  - Experience log (JSONL append-only interaction recording)
+  - Pydantic data models for specialist outputs, coordinator outputs, and interaction records
+  - Typer CLI with Rich formatted output (attribution table, reasoning display)
+- Configuration loader for YAML specialist and coordinator prompts
+- Pre-commit hooks (Black, Ruff, MyPy)
+
+### Changed
+- Backend simplified to OpenAI-only (removed Ollama, vLLM, Anthropic stubs)
+- Removed FastAPI/Uvicorn API server (CLI-only for now)
+- Coordinator `backend` parameter is now required (no default None)
+- Ruff config updated to use `[tool.ruff.lint]` section
+
+### Fixed
+- All Black formatting issues resolved
+- All Ruff lint errors resolved (unused imports, import ordering)
+- All mypy type errors resolved across 21 source files
 
 ---
 

@@ -37,12 +37,18 @@ Pre-alpha / Active Development
 **Implemented:**
 - Complete architecture specification
 - Project structure and configuration
-- Specialist personality configs (YAML-based)
-- OpenAI backend integration (GPT-4o specialists, GPT-4o-mini coordinator)
+- Full Phase 1 inference pipeline
+- Specialist class with Round 1 + Round 2 revision pass
+- Coordinator synthesis with self-state tracking
+- Orchestrator with async parallel specialist execution
+- OpenAI backend (GPT-4o specialists, GPT-4o-mini coordinator)
+- YAML-based specialist personality configs (logical, creative, skeptical, empathetic)
+- Coordinator prompt externalized to YAML
+- Experience logging (JSONL append-only)
+- Typer CLI with Rich output formatting
 
-**In Progress:**
-- Phase 1: Core inference pipeline (specialists, coordinator, orchestrator)
-- Phase 2: Competitive training system  
+**Next:**
+- Phase 2: Competitive training system
 - Phase 3: Sleep-cycle fine-tuning
 - Phase 4: Evaluation metrics and benchmarks
 
@@ -64,6 +70,21 @@ cp .env.example .env
 
 ---
 
+## Usage
+
+```bash
+# Run inference on a query
+python -m cli.main "What causes ocean tides?"
+
+# Skip the revision pass (faster, Round 1 only)
+python -m cli.main "What is 2+2?" --no-revision
+
+# Use a custom config
+python -m cli.main "Explain entropy" --config config/custom.yaml
+```
+
+---
+
 ## Architecture Overview
 
 ### Inference Pipeline
@@ -71,29 +92,29 @@ cp .env.example .env
 ```mermaid
 graph TD
     Input[Input Query] --> Broadcast{Orchestrator}
-    
+
     Broadcast -->|Round 1| L[Logical Specialist<br/>Analytical reasoning]
     Broadcast -->|Round 1| C[Creative Specialist<br/>Novel approaches]
     Broadcast -->|Round 1| S[Skeptical Specialist<br/>Critical analysis]
     Broadcast -->|Round 1| E[Empathetic Specialist<br/>Human-centered view]
-    
+
     L --> Share[Share All Outputs]
     C --> Share
     S --> Share
     E --> Share
-    
+
     Share -->|Round 2| L2[Logical<br/>Revise answer]
     Share -->|Round 2| C2[Creative<br/>Revise answer]
     Share -->|Round 2| S2[Skeptical<br/>Revise answer]
     Share -->|Round 2| E2[Empathetic<br/>Revise answer]
-    
+
     L2 --> Coord[Coordinator<br/>Small Model]
     C2 --> Coord
     S2 --> Coord
     E2 --> Coord
-    
+
     Coord --> Output[Final Answer<br/>+ Attribution<br/>+ Self-State]
-    
+
     style Input fill:#e1f5ff
     style Output fill:#d4edda
     style Coord fill:#fff3cd
@@ -108,23 +129,23 @@ sequenceDiagram
     participant A as Agent A
     participant C as Agent B
     participant J as Judge
-    
+
     B->>A: Same question
     B->>C: Same question
-    
+
     Note over A: Full inference<br/>(4 specialists + coordinator)
     Note over C: Full inference<br/>(4 specialists + coordinator)
-    
+
     A->>J: Answer A + reasoning traces
     C->>J: Answer B + reasoning traces
-    
+
     J->>J: Score both against ground truth
-    
+
     J->>A: Your score + opponent's reasoning
     J->>C: Your score + opponent's reasoning
-    
+
     Note over A,C: Both log interaction with cross-agent insights
-    
+
     rect rgb(240, 248, 255)
         Note over A,C: After N rounds: Sleep Cycle<br/>Winners teach, losers learn
     end
@@ -135,13 +156,13 @@ sequenceDiagram
 ```mermaid
 stateDiagram-v2
     [*] --> Awake: System Start
-    
+
     Awake --> Inference: User Query
     Inference --> Logging: Record interaction
     Logging --> Inference: Continue
-    
+
     Logging --> Asleep: Trigger<br/>(N interactions)
-    
+
     state Asleep {
         [*] --> Curate
         Curate --> Assemble: High-signal<br/>interactions
@@ -149,15 +170,15 @@ stateDiagram-v2
         FineTune --> Validate: LoRA adapters
         Validate --> [*]
     }
-    
+
     Asleep --> Awake: Updated specialists
-    
+
     note right of Awake
         Four specialists process in parallel
         Coordinator synthesizes results
         Experience logged to JSONL
     end note
-    
+
     note right of Asleep
         Curator selects valuable interactions
         Specialists fine-tuned on curated data
