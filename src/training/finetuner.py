@@ -60,7 +60,6 @@ class SpecialistFinetuner:
         try:
             import torch
             from datasets import Dataset
-            from transformers import TrainingArguments
             from trl import SFTTrainer
             from unsloth import FastLanguageModel
             from unsloth.chat_templates import get_chat_template
@@ -71,6 +70,16 @@ class SpecialistFinetuner:
                 f'  [dim]pip install "unsloth\\[colab-new]" trl transformers datasets[/dim]'
             )
             return None
+
+        # trl >= 0.9 uses SFTConfig + processing_class; older uses TrainingArguments + tokenizer
+        try:
+            from trl import SFTConfig
+
+            _use_sft_config = True
+        except ImportError:
+            from transformers import TrainingArguments  # type: ignore[assignment]
+
+            _use_sft_config = False
 
         examples = self._load_examples(Path(dataset_path))
         if len(examples) < self.min_examples:
@@ -117,27 +126,41 @@ class SpecialistFinetuner:
         adapter_dir = self.output_dir / specialist_name / version_tag / "adapter"
         adapter_dir.mkdir(parents=True, exist_ok=True)
 
-        trainer = SFTTrainer(
-            model=model,
-            tokenizer=tokenizer,
-            train_dataset=dataset,
-            dataset_text_field="text",
-            max_seq_length=self.max_seq_length,
-            args=TrainingArguments(
-                output_dir=str(adapter_dir),
-                num_train_epochs=self.epochs,
-                per_device_train_batch_size=self.batch_size,
-                gradient_accumulation_steps=self.grad_accumulation,
-                warmup_steps=5,
-                learning_rate=2e-4,
-                fp16=not torch.cuda.is_bf16_supported(),
-                bf16=torch.cuda.is_bf16_supported(),
-                logging_steps=10,
-                save_strategy="no",
-                report_to="none",
-                optim="adamw_8bit",
-            ),
+        _train_kwargs: dict[str, Any] = dict(
+            output_dir=str(adapter_dir),
+            num_train_epochs=self.epochs,
+            per_device_train_batch_size=self.batch_size,
+            gradient_accumulation_steps=self.grad_accumulation,
+            warmup_steps=5,
+            learning_rate=2e-4,
+            fp16=not torch.cuda.is_bf16_supported(),
+            bf16=torch.cuda.is_bf16_supported(),
+            logging_steps=10,
+            save_strategy="no",
+            report_to="none",
+            optim="adamw_8bit",
         )
+
+        if _use_sft_config:
+            trainer = SFTTrainer(
+                model=model,
+                processing_class=tokenizer,
+                train_dataset=dataset,
+                args=SFTConfig(
+                    dataset_text_field="text",
+                    max_seq_length=self.max_seq_length,
+                    **_train_kwargs,
+                ),
+            )
+        else:
+            trainer = SFTTrainer(
+                model=model,
+                tokenizer=tokenizer,
+                train_dataset=dataset,
+                dataset_text_field="text",
+                max_seq_length=self.max_seq_length,
+                args=TrainingArguments(**_train_kwargs),  # type: ignore[arg-type]
+            )
         trainer.train()
         model.save_pretrained(str(adapter_dir))
         tokenizer.save_pretrained(str(adapter_dir))
