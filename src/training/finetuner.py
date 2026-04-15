@@ -60,26 +60,16 @@ class SpecialistFinetuner:
         try:
             import torch
             from datasets import Dataset
-            from trl import SFTTrainer
+            from transformers import Trainer, TrainingArguments
             from unsloth import FastLanguageModel
             from unsloth.chat_templates import get_chat_template
         except ImportError:
             self.console.print(
                 f"  [yellow]unsloth not installed — skipping fine-tune for "
                 f"{specialist_name}[/yellow]\n"
-                f'  [dim]pip install "unsloth\\[colab-new]" trl transformers datasets[/dim]'
+                f'  [dim]pip install "unsloth\\[colab-new]" transformers datasets[/dim]'
             )
             return None
-
-        # trl >= 0.9 uses SFTConfig + processing_class; older uses TrainingArguments + tokenizer
-        try:
-            from trl import SFTConfig
-
-            _use_sft_config = True
-        except ImportError:
-            from transformers import TrainingArguments  # type: ignore[assignment]
-
-            _use_sft_config = False
 
         examples = self._load_examples(Path(dataset_path))
         if len(examples) < self.min_examples:
@@ -141,26 +131,11 @@ class SpecialistFinetuner:
             optim="adamw_8bit",
         )
 
-        if _use_sft_config:
-            trainer = SFTTrainer(
-                model=model,
-                processing_class=tokenizer,
-                train_dataset=dataset,
-                args=SFTConfig(
-                    max_seq_length=self.max_seq_length,
-                    dataset_num_proc=1,
-                    **_train_kwargs,
-                ),
-            )
-        else:
-            trainer = SFTTrainer(
-                model=model,
-                tokenizer=tokenizer,
-                train_dataset=dataset,
-                max_seq_length=self.max_seq_length,
-                dataset_num_proc=1,
-                args=TrainingArguments(**_train_kwargs),  # type: ignore[arg-type]
-            )
+        trainer = Trainer(
+            model=model,
+            args=TrainingArguments(**_train_kwargs),
+            train_dataset=dataset,
+        )
         trainer.train()
         model.save_pretrained(str(adapter_dir))
         tokenizer.save_pretrained(str(adapter_dir))
