@@ -70,7 +70,7 @@ class FineTuner:
         """Upload a training file to OpenAI. Returns the file ID."""
         with open(path, "rb") as f:
             response = self.client.files.create(file=f, purpose="fine-tune")
-        return response.id
+        return str(response.id)
 
     def create_job(
         self,
@@ -94,7 +94,7 @@ class FineTuner:
             params["validation_file"] = validation_file_id
 
         job = self.client.fine_tuning.jobs.create(**params)
-        return job.id
+        return str(job.id)
 
     def get_job_status(self, job_id: str) -> dict[str, Any]:
         """Check the status of a fine-tuning job."""

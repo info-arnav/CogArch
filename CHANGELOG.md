@@ -10,6 +10,23 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Self-improvement experiment pipeline
+  - `experiment` CLI command: `cogarch experiment gsm8k --cycles 5 --fine-tune`
+  - ExperimentRunner: baseline → N competitive/fine-tune cycles → final eval
+  - BenchmarkSplitter: deterministic train/test split with per-cycle unique partitioning
+  - No question reuse across cycles — each cycle trains on a fresh chunk
+  - Model swap mechanism: specialist models auto-updated to fine-tuned versions
+  - Full experiment report with per-cycle progress and improvement metrics
+  - Report saved as JSON to `data/experiments/`
+- HuggingFace benchmark loaders (via `datasets` library)
+  - GSM8KBenchmark: grade school math with numeric answer extraction
+  - MMLUBenchmark: 57-subject multiple choice with letter-based scoring
+  - TruthfulQABenchmark: free-form truthfulness with fuzzy matching
+  - Factory function `load_benchmark("gsm8k")` for easy instantiation
+- Experiment data models (Pydantic)
+  - ExperimentConfig, CycleResult, ExperimentReport
+- 41 new tests (splitter: 12, benchmark scoring: 19, experiment: 10)
+  - Total test count: 125
 - OpenAI fine-tuning integration
   - FineTuner: prepares chat-format JSONL, uploads to OpenAI, creates/monitors fine-tuning jobs
   - `--fine-tune` and `--wait` flags on `sleep` CLI command

@@ -568,5 +568,112 @@ def finetune_status(
         console.print("[yellow]Provide a --cycle number or job ID argument.[/yellow]")
 
 
+@app.command()
+def experiment(
+    benchmark: str = typer.Argument(
+        ...,
+        help="Benchmark name (gsm8k, mmlu, truthfulqa) or path to JSONL file",
+    ),
+    cycles: int = typer.Option(5, "--cycles", "-n", help="Number of training cycles"),
+    test_ratio: float = typer.Option(
+        0.2, "--test-ratio", help="Fraction of data held out for testing"
+    ),
+    metric: str = typer.Option(
+        "exact_match",
+        "--metric",
+        "-m",
+        help="Scoring metric: exact_match, fuzzy_match, llm_judge",
+    ),
+    fine_tune: bool = typer.Option(
+        True, "--fine-tune/--no-fine-tune", help="Submit fine-tuning jobs each cycle"
+    ),
+    wait: bool = typer.Option(
+        True,
+        "--wait/--no-wait",
+        help="Wait for fine-tuning to complete before next cycle",
+    ),
+    seed: int = typer.Option(42, "--seed", help="Random seed for reproducible splits"),
+    config_path: str = typer.Option(
+        "config/default.yaml", "--config", "-c", help="Path to config file"
+    ),
+    output_dir: str = typer.Option(
+        "data/experiments", "--output", "-o", help="Directory for experiment results"
+    ),
+) -> None:
+    """Run a full self-improvement experiment: baseline → train cycles → final eval."""
+    load_dotenv()
+
+    import asyncio
+
+    from rich.console import Console
+
+    from src.config import load_all_specialist_configs, load_config
+    from src.eval.experiment import ExperimentRunner
+    from src.eval.scorer import Scorer
+    from src.inference.backends.openai import OpenAIBackend
+    from src.inference.coordinator import Coordinator
+    from src.inference.orchestrator import Orchestrator
+    from src.inference.specialist import Specialist
+    from src.models.experiment import ExperimentConfig
+
+    console = Console()
+
+    async def _run() -> None:
+        cfg = load_config(config_path)
+        backend = OpenAIBackend()
+
+        # Build specialists
+        specialist_names = cfg["specialists"]["enabled"]
+        specialist_configs = load_all_specialist_configs(specialist_names)
+        default_model = cfg["specialists"]["model_id"]
+        specialists = {
+            name: Specialist(config, backend, default_model)
+            for name, config in specialist_configs.items()
+        }
+
+        # Build coordinator
+        coordinator = Coordinator(
+            model=cfg["coordinator"]["model_id"],
+            backend=backend,
+            temperature=cfg["coordinator"]["temperature"],
+            max_tokens=cfg["coordinator"]["max_tokens"],
+        )
+
+        # Build orchestrator
+        orchestrator = Orchestrator(
+            specialists=specialists,
+            coordinator=coordinator,
+            enable_revision=cfg["inference"]["enable_revision_pass"],
+        )
+
+        scorer = Scorer(backend=backend)
+
+        ft_cfg = cfg.get("sleep_cycle", {}).get("fine_tuning", {})
+        exp_config = ExperimentConfig(
+            benchmark_name=benchmark,
+            num_cycles=cycles,
+            test_ratio=test_ratio,
+            metric=metric,
+            fine_tune=fine_tune,
+            wait_for_fine_tune=wait,
+            base_model=ft_cfg.get("base_model", "gpt-4o-mini-2024-07-18"),
+            seed=seed,
+        )
+
+        runner = ExperimentRunner(
+            config=exp_config,
+            orchestrator=orchestrator,
+            specialists=specialists,
+            scorer=scorer,
+            experience_log_path=cfg["experience_log"]["path"],
+            output_dir=output_dir,
+            console=console,
+        )
+
+        await runner.run()
+
+    asyncio.run(_run())
+
+
 if __name__ == "__main__":
     app()
