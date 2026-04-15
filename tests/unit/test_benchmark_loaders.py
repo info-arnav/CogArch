@@ -1,4 +1,6 @@
-"""Tests for benchmark loaders — GSM8K, MMLU, TruthfulQA scoring logic."""
+"""Tests for benchmark loaders — GSM8K, MMLU, TruthfulQA scoring + loading."""
+
+import asyncio
 
 from src.eval.benchmarks.gsm8k import GSM8KBenchmark
 from src.eval.benchmarks.mmlu import MMLUBenchmark
@@ -37,6 +39,18 @@ class TestGSM8KScoring:
         score = self.bench.score("no numbers here", "42")
         assert score == 0.0  # fuzzy won't match
 
+    def test_load_local_gsm8k(self) -> None:
+        bench = GSM8KBenchmark(limit=5)
+        items = asyncio.run(bench.load())
+        assert len(items) == 5
+        assert items[0].category == "math"
+        assert items[0].expected_answer  # non-empty
+
+    def test_load_full_count(self) -> None:
+        bench = GSM8KBenchmark()
+        items = asyncio.run(bench.load())
+        assert len(items) == 1319
+
 
 class TestMMLUScoring:
     """Test MMLU multiple-choice letter scoring."""
@@ -66,6 +80,23 @@ class TestMMLUScoring:
     def test_empty_prediction(self) -> None:
         assert self.bench.score("", "A") == 0.0
 
+    def test_load_local_mmlu(self) -> None:
+        bench = MMLUBenchmark(limit=5)
+        items = asyncio.run(bench.load())
+        assert len(items) == 5
+        assert items[0].expected_answer in ("A", "B", "C", "D")
+
+    def test_load_full_count(self) -> None:
+        bench = MMLUBenchmark()
+        items = asyncio.run(bench.load())
+        assert len(items) == 14042
+
+    def test_filter_by_subject(self) -> None:
+        bench = MMLUBenchmark(subject="abstract_algebra", limit=10)
+        items = asyncio.run(bench.load())
+        assert len(items) <= 10
+        assert all(it.category == "abstract_algebra" for it in items)
+
 
 class TestTruthfulQAScoring:
     """Test TruthfulQA fuzzy matching."""
@@ -82,3 +113,14 @@ class TestTruthfulQAScoring:
 
     def test_completely_different(self) -> None:
         assert self.bench.score("xyz abc", "The earth is round") == 0.0
+
+    def test_load_local_truthfulqa(self) -> None:
+        bench = TruthfulQABenchmark(limit=5)
+        items = asyncio.run(bench.load())
+        assert len(items) == 5
+        assert items[0].expected_answer  # non-empty
+
+    def test_load_full_count(self) -> None:
+        bench = TruthfulQABenchmark()
+        items = asyncio.run(bench.load())
+        assert len(items) == 817

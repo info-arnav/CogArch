@@ -1,57 +1,39 @@
-"""MMLU benchmark loader — Massive Multitask Language Understanding."""
+"""MMLU benchmark loader — Massive Multitask Language Understanding (14,042 items)."""
 
 from __future__ import annotations
 
-from src.eval.benchmarks.base import Benchmark
+from pathlib import Path
+
+from src.eval.benchmarks.jsonl_benchmark import JsonlBenchmark
 from src.models.benchmark import BenchmarkItem
 
-# Map index → letter for multiple-choice answers
-_IDX_TO_LETTER = {0: "A", 1: "B", 2: "C", 3: "D"}
+_DEFAULT_PATH = (
+    Path(__file__).resolve().parents[3] / "data" / "benchmarks" / "mmlu.jsonl"
+)
 
 
-class MMLUBenchmark(Benchmark):
+class MMLUBenchmark(JsonlBenchmark):
     """MMLU: 57-subject multiple-choice benchmark.
 
-    Loads from HuggingFace ``cais/mmlu`` (all subjects) or a specific subject.
+    Reads pre-extracted items from ``data/benchmarks/mmlu.jsonl``.
+    Questions already include formatted A/B/C/D choices.
     """
 
     def __init__(
         self,
-        split: str = "test",
+        path: str | Path = _DEFAULT_PATH,
         subject: str | None = None,
         limit: int | None = None,
     ) -> None:
-        self.split = split
+        super().__init__(path=path, metric="exact_match", name="mmlu")
         self.subject = subject
         self.limit = limit
 
     async def load(self) -> list[BenchmarkItem]:
-        """Download / cache MMLU and convert to BenchmarkItem list."""
-        from datasets import load_dataset  # type: ignore[import-untyped]
-
-        config = self.subject if self.subject else "all"
-        ds = load_dataset("cais/mmlu", config, split=self.split)
-
-        items: list[BenchmarkItem] = []
-        for row in ds:
-            choices = row["choices"]
-            answer_idx = int(row["answer"])
-            expected_letter = _IDX_TO_LETTER.get(answer_idx, str(answer_idx))
-
-            # Format question with multiple-choice options
-            question_text = row["question"] + "\n"
-            for i, choice in enumerate(choices):
-                letter = _IDX_TO_LETTER.get(i, str(i))
-                question_text += f"{letter}) {choice}\n"
-
-            items.append(
-                BenchmarkItem(
-                    question=question_text.strip(),
-                    expected_answer=expected_letter,
-                    category=row.get("subject", self.subject or "general"),
-                    difficulty="medium",
-                )
-            )
+        """Load MMLU items from local JSONL, optionally filtering by subject."""
+        items = await super().load()
+        if self.subject:
+            items = [it for it in items if it.category == self.subject]
         if self.limit:
             items = items[: self.limit]
         return items

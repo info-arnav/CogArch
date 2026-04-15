@@ -131,14 +131,14 @@ class Coordinator:
             }
 
         return CoordinatorOutput(
-            final_answer=data.get("final_answer", ""),
+            final_answer=str(data.get("final_answer", "")),
             attribution=data.get("attribution", {}),
-            primary_specialist=data.get("primary_specialist", "unknown"),
+            primary_specialist=str(data.get("primary_specialist", "unknown")),
             confidence=float(data.get("confidence", 0.5)),
             specialist_agreement=float(data.get("specialist_agreement", 0.5)),
-            reasoning=data.get("reasoning", ""),
+            reasoning=str(data.get("reasoning", "")),
             should_log=data.get("should_log", True),
-            log_priority=data.get("log_priority", "medium"),
+            log_priority=str(data.get("log_priority", "medium")),
             updated_self_state=self.self_state.model_copy(),
         )
 

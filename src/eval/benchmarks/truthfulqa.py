@@ -1,47 +1,35 @@
-"""TruthfulQA benchmark loader — tests for truthful, non-hallucinated answers."""
+"""TruthfulQA benchmark loader — tests for truthful, non-hallucinated answers (817 items)."""
 
 from __future__ import annotations
 
-from src.eval.benchmarks.base import Benchmark
+from pathlib import Path
+
+from src.eval.benchmarks.jsonl_benchmark import JsonlBenchmark
 from src.eval.scorer import Scorer
 from src.models.benchmark import BenchmarkItem
 
+_DEFAULT_PATH = (
+    Path(__file__).resolve().parents[3] / "data" / "benchmarks" / "truthfulqa.jsonl"
+)
 
-class TruthfulQABenchmark(Benchmark):
+
+class TruthfulQABenchmark(JsonlBenchmark):
     """TruthfulQA: 817-question benchmark for truthfulness.
 
-    Loads the ``generation`` config from HuggingFace ``truthfulqa/truthful_qa``.
+    Reads pre-extracted items from ``data/benchmarks/truthfulqa.jsonl``.
     Scoring uses fuzzy matching against the best correct answer.
     """
 
-    def __init__(self, limit: int | None = None) -> None:
+    def __init__(
+        self, path: str | Path = _DEFAULT_PATH, limit: int | None = None
+    ) -> None:
+        super().__init__(path=path, metric="fuzzy_match", name="truthfulqa")
         self.limit = limit
         self._scorer = Scorer()
 
     async def load(self) -> list[BenchmarkItem]:
-        """Download / cache TruthfulQA and convert to BenchmarkItem list."""
-        from datasets import load_dataset  # type: ignore[import-untyped]
-
-        ds = load_dataset("truthfulqa/truthful_qa", "generation", split="validation")
-
-        items: list[BenchmarkItem] = []
-        for row in ds:
-            # best_answer is the top correct answer
-            best = row.get("best_answer", "")
-            if not best:
-                correct_answers = row.get("correct_answers", [])
-                best = correct_answers[0] if correct_answers else ""
-            if not best:
-                continue
-
-            items.append(
-                BenchmarkItem(
-                    question=row["question"],
-                    expected_answer=best,
-                    category=row.get("category", "general"),
-                    difficulty="hard",
-                )
-            )
+        """Load TruthfulQA items from local JSONL."""
+        items = await super().load()
         if self.limit:
             items = items[: self.limit]
         return items

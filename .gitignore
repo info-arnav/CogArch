@@ -53,6 +53,9 @@ data/experience_log/*.jsonl
 data/checkpoints/
 data/benchmarks/*.jsonl
 !data/benchmarks/sample.jsonl
+!data/benchmarks/gsm8k.jsonl
+!data/benchmarks/mmlu.jsonl
+!data/benchmarks/truthfulqa.jsonl
 data/training/*.jsonl
 data/metrics/*.json
 data/self_state/*.json

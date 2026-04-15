@@ -1,45 +1,36 @@
-"""GSM8K benchmark loader — grade school math via HuggingFace datasets."""
+"""GSM8K benchmark loader — grade school math (1,319 items)."""
 
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
-from src.eval.benchmarks.base import Benchmark
+from src.eval.benchmarks.jsonl_benchmark import JsonlBenchmark
 from src.eval.scorer import Scorer
 from src.models.benchmark import BenchmarkItem
 
+_DEFAULT_PATH = (
+    Path(__file__).resolve().parents[3] / "data" / "benchmarks" / "gsm8k.jsonl"
+)
 
-class GSM8KBenchmark(Benchmark):
+
+class GSM8KBenchmark(JsonlBenchmark):
     """GSM8K: Grade School Math 8K.
 
-    Loads from HuggingFace ``openai/gsm8k`` dataset. Each item has a
-    multi-step math word problem and a numeric answer after ``####``.
+    Reads pre-extracted items from ``data/benchmarks/gsm8k.jsonl``.
+    Each item is a multi-step math word problem with a numeric answer.
     """
 
-    def __init__(self, split: str = "test", limit: int | None = None) -> None:
-        self.split = split
+    def __init__(
+        self, path: str | Path = _DEFAULT_PATH, limit: int | None = None
+    ) -> None:
+        super().__init__(path=path, metric="exact_match", name="gsm8k")
         self.limit = limit
         self._scorer = Scorer()
 
     async def load(self) -> list[BenchmarkItem]:
-        """Download / cache GSM8K and convert to BenchmarkItem list."""
-        from datasets import load_dataset  # type: ignore[import-untyped]
-
-        ds = load_dataset("openai/gsm8k", "main", split=self.split)
-        items: list[BenchmarkItem] = []
-        for row in ds:
-            answer_text: str = row["answer"]
-            # Ground truth is the number after ####
-            match = re.search(r"####\s*(.+)", answer_text)
-            expected = match.group(1).strip() if match else answer_text.strip()
-            items.append(
-                BenchmarkItem(
-                    question=row["question"],
-                    expected_answer=expected,
-                    category="math",
-                    difficulty="medium",
-                )
-            )
+        """Load GSM8K items from local JSONL."""
+        items = await super().load()
         if self.limit:
             items = items[: self.limit]
         return items
