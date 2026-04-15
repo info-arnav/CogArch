@@ -244,8 +244,10 @@ class SpecialistFinetuner:
         return dataset_cls.from_list(rows)
 
     def _find_gguf(self, gguf_dir: Path) -> Path | None:
-        candidates = sorted(gguf_dir.glob("*.gguf"))
-        return candidates[0] if candidates else None
+        # unsloth appends _gguf to the dir name, so search parent recursively
+        candidates = sorted(gguf_dir.parent.rglob("*.gguf"))
+        q4 = [c for c in candidates if "Q4_K_M" in c.name]
+        return q4[0] if q4 else (candidates[0] if candidates else None)
 
     def _register_ollama(
         self,
