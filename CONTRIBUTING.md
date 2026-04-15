@@ -33,23 +33,23 @@ pre-commit install
 ```
 CogArch/
 ├── src/              # Core library code
-│   ├── models/      # Data structures
-│   ├── inference/   # Specialists, coordinator, orchestrator
-│   ├── training/    # Sleep cycle, competitive learning
+│   ├── models/      # Pydantic data models
+│   ├── inference/   # Specialists, coordinator, orchestrator, LLM backends
+│   ├── training/    # Sleep cycle, competitive learning, fine-tuner
 │   ├── memory/      # Experience log, persistence
-│   └── eval/        # Benchmarks, metrics
-├── cli/             # Command-line interface
-├── prompts/         # Specialist configs (YAML)
+│   └── eval/        # Benchmarks (GSM8K, MMLU, TruthfulQA), metrics, splitter, experiment runner
+├── cli/             # Command-line interface (Typer + Rich)
+├── prompts/         # Specialist and coordinator configs (YAML)
 ├── tests/           # Unit and integration tests
 ├── config/          # Configuration files
-└── data/            # Runtime data (gitignored)
+└── data/            # Runtime data (gitignored, except sample.jsonl)
 ```
 
 **Running Tests:**
 
 ```bash
 pytest                                    # Run all tests
-pytest tests/unit/test_specialist.py     # Run specific test
+pytest tests/unit/test_splitter.py       # Run specific test
 pytest --cov=src --cov-report=html       # With coverage
 ```
 
@@ -123,14 +123,14 @@ from pydantic import BaseModel, Field
 
 class SpecialistOutput(BaseModel):
     """Output from a single specialist's reasoning process.
-    
+
     Attributes:
         specialist_name: Identifier for this specialist
         answer: The specialist's answer to the input
         reasoning_trace: Full chain-of-thought reasoning
         confidence: 0-1 confidence score
     """
-    
+
     specialist_name: str = Field(..., description="Specialist identifier")
     answer: str = Field(..., description="Generated answer")
     reasoning_trace: str = Field(..., description="Step-by-step reasoning")

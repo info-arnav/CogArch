@@ -28,7 +28,8 @@ CogArch is a research framework where:
 **Novel contributions:**
 - Vindication tracking: deprioritized specialists get credit when they were actually right
 - Competitive learning: two agent instances compete on benchmarks and learn from each other's reasoning traces
-- Sleep-cycle consolidation: LoRA fine-tuning of specialists based on curated high-signal interactions
+- Sleep-cycle consolidation: OpenAI fine-tuning of specialists based on curated high-signal interactions
+- Self-improvement experiments: automated baseline → train → re-test loop proving the system improves on real benchmarks (GSM8K, MMLU, TruthfulQA)
 
 ---
 
@@ -37,21 +38,20 @@ CogArch is a research framework where:
 Pre-alpha / Active Development
 
 **Implemented:**
-- Complete architecture specification
-- Project structure and configuration
 - Phase 1: Full inference pipeline (specialists, coordinator, orchestrator)
-- Phase 2: Competitive training system (two agents compete on benchmarks)
-- Phase 3: Sleep cycle (curator, dataset builder, sleep report)
-- Phase 4: Evaluation (scorer, metrics tracker, benchmark loader)
+- Phase 2: Competitive training (two agents compete on benchmarks)
+- Phase 3: Sleep cycle (curator, dataset builder, fine-tuning, sleep report)
+- Phase 4: Evaluation (scorer, metrics tracker, benchmark loaders)
+- Phase 5: Self-improvement experiment pipeline
+  - HuggingFace benchmark loaders (GSM8K, MMLU, TruthfulQA)
+  - Train/test splitting with per-cycle unique question partitioning
+  - Automated baseline → compete → fine-tune → re-test loop
+  - Model swap: specialists auto-updated to fine-tuned versions
+- OpenAI fine-tuning integration (file upload, job creation, monitoring)
 - OpenAI backend (GPT-4o specialists, GPT-4o-mini coordinator)
 - YAML-based specialist + coordinator prompt configs
 - Experience logging (JSONL append-only)
-- CLI commands: `infer`, `compete`, `sleep`, `dashboard`
-
-**Next:**
-- LoRA / OpenAI fine-tuning integration
-- Additional benchmark suites (ARC-AGI, FrontierMath, causal)
-- Metrics visualization and trend tracking
+- CLI commands: `infer`, `compete`, `sleep`, `dashboard`, `bench`, `experiment`, `finetune-status`
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how to help.
 
@@ -85,6 +85,18 @@ python -m cli.main compete data/benchmarks/sample.jsonl --rounds 3
 
 # Run a sleep cycle (curate interactions, build training datasets)
 python -m cli.main sleep
+
+# Sleep cycle with OpenAI fine-tuning
+python -m cli.main sleep --fine-tune --wait
+
+# Run benchmark evaluation
+python -m cli.main bench data/benchmarks/sample.jsonl --metric fuzzy_match
+
+# Run a full self-improvement experiment (downloads from HuggingFace)
+python -m cli.main experiment gsm8k --cycles 5 --fine-tune --wait
+
+# Check fine-tuning job status
+python -m cli.main finetune-status --cycle 1
 
 # View metrics dashboard
 python -m cli.main dashboard
@@ -174,7 +186,7 @@ stateDiagram-v2
         [*] --> Curate
         Curate --> Assemble: High-signal<br/>interactions
         Assemble --> FineTune: Per-specialist<br/>datasets
-        FineTune --> Validate: LoRA adapters
+        FineTune --> Validate: OpenAI fine-tuning
         Validate --> [*]
     }
 
@@ -194,10 +206,11 @@ stateDiagram-v2
 ```
 
 **Core Components:**
-- **Specialists**: Same base model (GPT-4o), different personalities (YAML configs + future LoRA adapters)
+- **Specialists**: Same base model (GPT-4o), different personalities (YAML configs + fine-tuned adapters)
 - **Coordinator**: Smaller model (GPT-4o-mini) that routes and synthesizes, doesn't solve directly
 - **Experience Log**: JSONL append-only record of all interactions for training
 - **Sleep Cycle**: Curate → Assemble → Fine-tune → Validate loop
+- **Experiment Runner**: Automated self-improvement loop with real benchmarks from HuggingFace
 - **Competitive Training**: Two agents compete, cross-learn from reasoning traces
 
 ---

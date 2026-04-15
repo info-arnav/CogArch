@@ -324,36 +324,6 @@ class TestBenchmarkEvaluation:
 
         assert score > 0.5
 
-    @pytest.mark.asyncio
-    async def test_real_math_benchmark_loads(self) -> None:
-        """Verify the math reasoning benchmark file loads correctly."""
-        bench = JsonlBenchmark(path="data/benchmarks/math_reasoning.jsonl")
-        items = await bench.load()
-        assert len(items) == 20
-        assert all(item.category != "" for item in items)
-
-    @pytest.mark.asyncio
-    async def test_real_causal_benchmark_loads(self) -> None:
-        """Verify the causal reasoning benchmark file loads correctly."""
-        bench = JsonlBenchmark(path="data/benchmarks/causal_reasoning.jsonl")
-        items = await bench.load()
-        assert len(items) == 15
-        assert all(item.expected_answer != "" for item in items)
-
-    @pytest.mark.asyncio
-    async def test_real_knowledge_benchmark_loads(self) -> None:
-        """Verify the knowledge QA benchmark file loads correctly."""
-        bench = JsonlBenchmark(path="data/benchmarks/knowledge_qa.jsonl")
-        items = await bench.load()
-        assert len(items) == 20
-
-    @pytest.mark.asyncio
-    async def test_real_logic_benchmark_loads(self) -> None:
-        """Verify the logic puzzles benchmark file loads correctly."""
-        bench = JsonlBenchmark(path="data/benchmarks/logic_puzzles.jsonl")
-        items = await bench.load()
-        assert len(items) == 15
-
 
 class TestMetricsFromCompetitive:
     """Test that metrics computation works on competitive data."""

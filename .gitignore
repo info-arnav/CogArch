@@ -50,11 +50,13 @@ dmypy.json
 
 # Runtime data (IMPORTANT - don't commit training data!)
 data/experience_log/*.jsonl
-data/checkpoints/*/
-data/benchmarks/*/
+data/checkpoints/
+data/benchmarks/*.jsonl
+!data/benchmarks/sample.jsonl
 data/training/*.jsonl
 data/metrics/*.json
 data/self_state/*.json
+data/experiments/
 
 # Allow schema files
 !data/**/.schema.json
@@ -75,6 +77,3 @@ config/*.local.yaml
 # Logs
 *.log
 logs/
-
-# AI
-docs/
