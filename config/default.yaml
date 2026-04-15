@@ -48,3 +48,18 @@ competitive:
   rounds_per_session: 50
   benchmark: "arc-agi"
   sleep_after_session: true
+
+# ── Fine-tuning (requires GPU + unsloth) ──
+finetuning:
+  enabled: true # set false to use in-context learning only
+  base_model: "unsloth/llama-3-8b-bnb-4bit" # pre-quantized for fast Colab download
+  lora_rank: 16
+  lora_alpha: 16
+  epochs: 3
+  batch_size: 4
+  grad_accumulation: 4
+  max_seq_length: 2048
+  min_examples: 10 # skip if fewer curated examples than this
+  output_dir: "models" # GGUF + adapter weights saved here
+  registry_path: "models/registry.json" # versioned model tracking + rollback
+  regression_threshold: 0.05 # roll back if score drops more than this

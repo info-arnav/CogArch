@@ -26,6 +26,7 @@ CogArch is a research framework where:
 - Self-state tracking - the system maintains awareness of its own uncertainty, focus, and routing patterns
 
 **Novel contributions:**
+
 - Vindication tracking: deprioritized specialists get credit when they were actually right
 - Competitive learning: two agent instances compete on benchmarks and learn from each other's reasoning traces
 - Sleep-cycle consolidation: curates high-signal interactions into per-specialist training datasets
@@ -39,14 +40,17 @@ CogArch is a research framework where:
 Pre-alpha / Active Development
 
 **Implemented:**
+
 - Phase 1: Full inference pipeline (specialists, coordinator, orchestrator)
 - Phase 2: Competitive training (two agents compete on benchmarks)
-- Phase 3: Sleep cycle (curator, dataset builder, metrics, sleep report)
+- Phase 3: Sleep cycle (curator, dataset builder, QLoRA fine-tuning, metrics)
 - Phase 4: Evaluation (scorer, metrics tracker, benchmark loaders)
 - Phase 5: Self-improvement experiment pipeline
   - Local benchmark loaders (GSM8K, MMLU, TruthfulQA as JSONL)
   - Train/test splitting with per-cycle unique question partitioning
-  - Automated baseline → compete → sleep → re-test loop
+  - Automated baseline → compete → sleep → fine-tune → re-test loop
+- **QLoRA fine-tuning** — each sleep cycle produces a new versioned specialist model via unsloth
+- **Model registry** — versioned checkpoints per specialist, automatic rollback on score regression
 - Ollama backend (Llama 3 8B for all specialists and coordinator)
 - YAML-based specialist + coordinator prompt configs
 - Experience logging (JSONL append-only)
@@ -67,6 +71,14 @@ make install-dev
 cp .env.example .env
 # Ensure Ollama is running: ollama serve
 # Pull the model: ollama pull llama3:8b
+```
+
+**With fine-tuning (GPU required):**
+
+```bash
+pip install "unsloth[colab-new]" trl transformers datasets
+# Fine-tuning runs automatically inside the sleep cycle and experiment commands.
+# Specialist models are versioned under models/ and registered with Ollama daily.
 ```
 
 ---
@@ -200,6 +212,7 @@ stateDiagram-v2
 ```
 
 **Core Components:**
+
 - **Specialists**: Same base model (Llama 3 8B via Ollama), different personalities (YAML configs)
 - **Coordinator**: Same model used for routing and synthesis, doesn't solve directly
 - **Experience Log**: JSONL append-only record of all interactions for training
@@ -224,7 +237,8 @@ stateDiagram-v2
 - Ollama installed and running (`ollama serve`)
 - Llama 3 8B model pulled (`ollama pull llama3:8b`)
 - No API keys required — runs 100% locally
-- No GPU required (but recommended for faster inference)
+- No GPU required for inference (but recommended)
+- GPU required for fine-tuning (`finetuning.enabled: true` in config) — A100/T4 on Colab works well
 
 ---
 
@@ -260,6 +274,7 @@ MIT License - see [LICENSE.md](LICENSE.md) for details.
 ## Acknowledgments
 
 Inspired by:
+
 - Global Workspace Theory (Bernard Baars)
 - Attention Schema Theory (Michael Graziano)
 - The Wake-Sleep algorithm (Hinton et al.)

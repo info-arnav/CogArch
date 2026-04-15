@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from src.eval.benchmarks.jsonl_benchmark import JsonlBenchmark
@@ -39,11 +40,34 @@ class MMLUBenchmark(JsonlBenchmark):
         return items
 
     def score(self, predicted: str, ground_truth: str) -> float:
-        """Check if the predicted letter matches ground truth."""
+        """Check if the predicted letter matches ground truth.
+
+        Handles verbose model responses like "The answer is B" or "I'd choose option C".
+        Priority order:
+          1. Direct match at start of response ("B", "B)", "(B)", "B. because...")
+          2. Explicit answer indicator ("the answer is B", "answer: B", "option B")
+          3. Any standalone A/B/C/D letter at a word boundary (last occurrence wins)
+        """
         pred = predicted.strip().upper()
         gt = ground_truth.strip().upper()
-        # Accept just the letter or "A)" or "(A)" formats
+
+        # 1. Direct match at start
         for fmt in [pred, pred.rstrip(")"), pred.strip("()")]:
             if fmt and fmt[0] == gt:
                 return 1.0
+
+        # 2. Explicit answer indicator — most reliable for verbose responses
+        explicit = re.findall(
+            r"(?:answer(?:s| is| are)?|option|choice|select(?:ion)?|correct(?:ly)?)"
+            r"[:\s]+([ABCD])\b",
+            pred,
+        )
+        if explicit and explicit[-1] == gt:
+            return 1.0
+
+        # 3. Any standalone letter — last occurrence is usually the conclusion
+        standalone = re.findall(r"\b([ABCD])\b", pred)
+        if standalone and standalone[-1] == gt:
+            return 1.0
+
         return 0.0

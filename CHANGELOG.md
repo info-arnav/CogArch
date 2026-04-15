@@ -9,7 +9,43 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **QLoRA fine-tuning via unsloth** (`src/training/finetuner.py`)
+  - Each sleep cycle now produces a new versioned specialist model (e.g. `logical-2026-04-16`)
+  - Exports merged Q4_K_M GGUF and registers with Ollama via `ollama create`
+  - Graceful degradation: skips silently when unsloth is not installed (CPU machines)
+  - Configurable via `finetuning:` block in `config/default.yaml`
+- **Model registry with rollback** (`src/training/model_registry.py`)
+  - Versioned per-specialist model history stored in `models/registry.json`
+  - `promote_or_rollback()`: automatically reverts to previous version on score regression (>5% drop)
+  - `latest()`: each specialist always loads its best fine-tuned model at inference time
+- **Proper specialist_improvements tracking** in `SleepReport`
+  - Previously hardcoded to `0.0` for all specialists every cycle
+  - Now reports actual win rate from curated examples (wins + 0.5 × vindicated / total)
+- **Real routing_accuracy delta** in `SleepReport`
+  - `routing_accuracy_before`: computed over all historical records
+  - `routing_accuracy_after`: recomputed over curated high-signal subset (distinct values)
+- **Robust MMLU scoring** (`src/eval/benchmarks/mmlu.py`)
+  - Old scorer only checked `pred[0]`, failing on verbose responses like "The answer is B"
+  - New scorer: 3-tier fallback — direct start match → explicit indicator regex → standalone letter
+- **Few-shot injection for CPU fallback** (`src/inference/specialist.py`)
+  - `inject_few_shot_examples(path, max_k)` prepends curated Q&A pairs to system prompt
+  - `clear_few_shot_examples()` resets to original prompt
+  - Used automatically when fine-tuning is disabled or skipped
+
 ### Changed
+
+- `SleepCycle` now accepts optional `finetuner` and `registry` parameters
+- `Specialist.__init__` accepts optional `registry` — uses `registry.latest(name)` as model
+- `ExperimentRunner` wires finetuner + registry through the full experiment loop
+- Sleep cycle log line now shows routing accuracy delta per cycle
+- `requirements.txt` updated with fine-tuning dependencies (commented, GPU-only)
+
+---
+
+### Changed
+
 - **Switched from OpenAI to Ollama** — all inference now runs locally via Llama 3 8B
   - Replaced `OpenAIBackend` with `OllamaBackend` (httpx async client → `POST /api/chat`)
   - Removed `openai` Python dependency entirely
@@ -21,6 +57,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Updated config to use `llama3:8b` for all specialists and coordinator
 
 ### Added
+
 - Self-improvement experiment pipeline
   - `experiment` CLI command: `cogarch experiment gsm8k --cycles 5`
   - ExperimentRunner: baseline → N competitive/sleep cycles → final eval
@@ -72,12 +109,14 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Sample benchmark file (data/benchmarks/sample.jsonl)
 
 ### Changed
+
 - Backend simplified to OpenAI-only (removed Ollama, vLLM, Anthropic stubs)
 - Removed FastAPI/Uvicorn API server (CLI-only for now)
 - Coordinator `backend` parameter is now required (no default None)
 - Ruff config updated to use `[tool.ruff.lint]` section
 
 ### Fixed
+
 - All Black formatting issues resolved
 - All Ruff lint errors resolved (unused imports, import ordering)
 - All mypy type errors resolved across 21 source files
@@ -87,6 +126,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.1.0] - 2026-04-14
 
 ### Added
+
 - Project initialization
 - Architecture specification
 - Core project structure

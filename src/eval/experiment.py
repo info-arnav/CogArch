@@ -29,6 +29,8 @@ from src.eval.scorer import Scorer
 from src.eval.splitter import BenchmarkSplitter
 from src.models.benchmark import BenchmarkItem
 from src.models.experiment import CycleResult, ExperimentConfig, ExperimentReport
+from src.training.finetuner import SpecialistFinetuner
+from src.training.model_registry import ModelRegistry
 
 
 def load_benchmark(name: str, limit: int | None = None) -> Benchmark:
@@ -66,6 +68,8 @@ class ExperimentRunner:
         experience_log_path: str = "data/experience_log/",
         output_dir: str | Path = "data/experiments",
         console: Console | None = None,
+        finetuner: SpecialistFinetuner | None = None,
+        registry: ModelRegistry | None = None,
     ) -> None:
         self.config = config
         self.orchestrator = orchestrator
@@ -75,7 +79,9 @@ class ExperimentRunner:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.console = console or Console()
-        self._model_history: list[dict[str, str]] = []
+        self.finetuner = finetuner
+        self.registry = registry
+        self._best_score: float = 0.0
 
     async def run(self) -> ExperimentReport:
         """Execute the full experiment pipeline."""
@@ -114,10 +120,15 @@ class ExperimentRunner:
         report.baseline_score = baseline["avg_score"]
         report.baseline_correct = baseline["correct"]
         report.baseline_per_category = baseline["per_category"]
+        self._best_score = baseline["avg_score"]
         self.console.print(
             f"Baseline: {baseline['correct']}/{len(splitter.test_items)} "
             f"({baseline['avg_score']:.3f})\n"
         )
+
+        if self.registry is not None:
+            for name in self.specialists:
+                self.registry.set_baseline_score(name, baseline["avg_score"])
 
         # Step 2: Cycle loop
         for cycle_idx in range(splitter.num_cycles):
@@ -249,24 +260,60 @@ class ExperimentRunner:
         builder = DatasetBuilder()
         metrics_tracker = MetricsTracker(metrics_dir=str(self.output_dir / "metrics"))
 
+        system_prompts = {
+            name: s.config.system_prompt for name, s in self.specialists.items()
+        }
+
         sleep_cycle = SleepCycle(
             experience_log=exp_log,
             curator=curator,
             dataset_builder=builder,
             metrics_tracker=metrics_tracker,
+            system_prompts=system_prompts,
             cycle_num=cycle_num,
+            finetuner=self.finetuner,
+            registry=self.registry,
         )
 
-        self.console.print("  Running sleep cycle...")
-        sleep_cycle.run()
+        self.console.print("  Running sleep cycle (curate → fine-tune → metrics)...")
+        sleep_report = sleep_cycle.run()
+        self.console.print(
+            f"  [dim]Curated {sleep_report.items_curated} interactions · "
+            f"{sleep_report.training_examples_generated} training examples · "
+            f"routing {sleep_report.routing_accuracy_before:.2f} → "
+            f"{sleep_report.routing_accuracy_after:.2f}[/dim]"
+        )
 
-        # ── Evaluate on held-out test set ──
+        if self.registry is not None:
+            for name, specialist in self.specialists.items():
+                latest = self.registry.latest(name)
+                if latest != specialist.model:
+                    specialist.model = latest
+                    self.console.print(f"    [dim]{name}: model → {latest}[/dim]")
+
         self.console.print(f"  Evaluating on {len(test_items)} test items...")
         test_metrics = await self._evaluate(test_items, benchmark)
         cycle_result.test_score = test_metrics["avg_score"]
         cycle_result.test_correct = test_metrics["correct"]
         cycle_result.test_total = test_metrics["total"]
         cycle_result.per_category_scores = test_metrics["per_category"]
+
+        if (
+            self.registry is not None
+            and test_metrics["avg_score"] < self._best_score - 0.05
+        ):
+            self.console.print(
+                f"  [yellow]Score regressed "
+                f"({test_metrics['avg_score']:.3f} < {self._best_score:.3f} - 0.05) "
+                f"— rolling back all specialists[/yellow]"
+            )
+            for name, specialist in self.specialists.items():
+                prev = self.registry.rollback(name)
+                if prev != specialist.model:
+                    specialist.model = prev
+                    self.console.print(f"    [dim]{name}: rolled back → {prev}[/dim]")
+        else:
+            self._best_score = max(self._best_score, test_metrics["avg_score"])
 
         return cycle_result
 
