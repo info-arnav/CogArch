@@ -130,12 +130,16 @@ class Coordinator:
                 "log_priority": "high",
             }
 
+        sa = data.get("specialist_agreement", 0.5)
+        if isinstance(sa, dict):
+            sa = sum(sa.values()) / len(sa) if sa else 0.5
+
         return CoordinatorOutput(
             final_answer=str(data.get("final_answer", "")),
             attribution=data.get("attribution", {}),
             primary_specialist=str(data.get("primary_specialist", "unknown")),
             confidence=float(data.get("confidence", 0.5)),
-            specialist_agreement=float(data.get("specialist_agreement", 0.5)),
+            specialist_agreement=float(sa),
             reasoning=str(data.get("reasoning", "")),
             should_log=data.get("should_log", True),
             log_priority=str(data.get("log_priority", "medium")),
