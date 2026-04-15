@@ -521,6 +521,8 @@ def experiment(
     from src.inference.orchestrator import Orchestrator
     from src.inference.specialist import Specialist
     from src.models.experiment import ExperimentConfig
+    from src.training.finetuner import SpecialistFinetuner
+    from src.training.model_registry import ModelRegistry
 
     console = Console()
 
@@ -557,6 +559,26 @@ def experiment(
 
         scorer = Scorer(backend=backend)
 
+        ft_cfg = cfg.get("finetuning", {})
+        finetuner: SpecialistFinetuner | None = None
+        registry: ModelRegistry | None = None
+        if ft_cfg.get("enabled", False):
+            finetuner = SpecialistFinetuner(
+                base_model=ft_cfg.get("base_model", "unsloth/llama-3-8b-bnb-4bit"),
+                lora_rank=ft_cfg.get("lora_rank", 16),
+                lora_alpha=ft_cfg.get("lora_alpha", 16),
+                epochs=ft_cfg.get("epochs", 3),
+                batch_size=ft_cfg.get("batch_size", 4),
+                grad_accumulation=ft_cfg.get("grad_accumulation", 4),
+                max_seq_length=ft_cfg.get("max_seq_length", 2048),
+                min_examples=ft_cfg.get("min_examples", 10),
+                output_dir=ft_cfg.get("output_dir", "models"),
+                console=console,
+            )
+            registry = ModelRegistry(
+                registry_path=ft_cfg.get("registry_path", "models/registry.json")
+            )
+
         exp_config = ExperimentConfig(
             benchmark_name=benchmark,
             num_cycles=cycles,
@@ -573,6 +595,8 @@ def experiment(
             experience_log_path=cfg["experience_log"]["path"],
             output_dir=output_dir,
             console=console,
+            finetuner=finetuner,
+            registry=registry,
         )
 
         await runner.run()
