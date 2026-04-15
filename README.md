@@ -5,6 +5,7 @@
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square" alt="Python 3.10+" /></a>
   <a href="https://github.com/info-arnav/CogArch/issues"><img src="https://img.shields.io/github/issues/info-arnav/CogArch?style=flat-square" alt="Open issues" /></a>
   <a href="https://github.com/info-arnav/CogArch/stargazers"><img src="https://img.shields.io/github/stars/info-arnav/CogArch?style=flat-square" alt="GitHub stars" /></a>
+  <a href="https://colab.research.google.com/drive/1C1_C1b3sfIGZF4y6eg8-JThzWWZuz5KO?usp=sharing"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open in Colab" /></a>
 </p>
 
 A Python framework for machine consciousness through parallel specialist LLMs, competitive learning, and sleep-cycle self-improvement.
@@ -61,6 +62,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for how to help.
 ---
 
 ## Quick Setup
+
+**Run on Google Colab (A100, no local setup):** [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1C1_C1b3sfIGZF4y6eg8-JThzWWZuz5KO?usp=sharing)
+
+**Local setup:**
 
 ```bash
 git clone https://github.com/info-arnav/CogArch.git
