@@ -149,6 +149,7 @@ class SpecialistFinetuner:
                 args=SFTConfig(
                     dataset_text_field="text",
                     max_seq_length=self.max_seq_length,
+                    dataset_num_proc=1,
                     **_train_kwargs,
                 ),
             )
@@ -159,6 +160,7 @@ class SpecialistFinetuner:
                 train_dataset=dataset,
                 dataset_text_field="text",
                 max_seq_length=self.max_seq_length,
+                dataset_num_proc=1,
                 args=TrainingArguments(**_train_kwargs),  # type: ignore[arg-type]
             )
         trainer.train()
