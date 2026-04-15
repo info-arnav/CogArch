@@ -1,1 +1,1 @@
-"""LLM backend adapter for OpenAI API."""
+"""LLM backend adapter for Ollama (local inference)."""

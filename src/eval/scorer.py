@@ -29,7 +29,7 @@ class Scorer:
         question: str,
         predicted: str,
         ground_truth: str,
-        model: str = "gpt-4o",
+        model: str = "llama3:8b",
     ) -> float:
         """Use an LLM to judge if the predicted answer is semantically correct."""
         if self.backend is None:

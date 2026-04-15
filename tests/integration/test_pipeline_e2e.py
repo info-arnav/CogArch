@@ -26,13 +26,13 @@ def _make_specialist(name: str, backend: MockBackend) -> Specialist:
     config = SpecialistConfig(
         name=name, system_prompt=f"You are the {name} specialist.", temperature=0.4
     )
-    return Specialist(config, backend, default_model="gpt-4o")
+    return Specialist(config, backend, default_model="llama3:8b")
 
 
 def _make_coordinator(backend: MockBackend) -> Coordinator:
     return Coordinator(
         backend=backend,
-        model="gpt-4o-mini",
+        model="llama3:8b",
         temperature=0.3,
         max_tokens=1024,
     )
@@ -313,7 +313,7 @@ class TestBenchmarkEvaluation:
         specialists = {
             name: _make_specialist(name, backend) for name in ["logical", "creative"]
         }
-        coordinator = Coordinator(backend=backend, model="gpt-4o-mini", temperature=0.3)
+        coordinator = Coordinator(backend=backend, model="llama3:8b", temperature=0.3)
         orchestrator = Orchestrator(
             specialists=specialists, coordinator=coordinator, enable_revision=False
         )

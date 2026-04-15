@@ -13,7 +13,7 @@ class Specialist:
         self,
         config: SpecialistConfig,
         backend: LLMBackend,
-        default_model: str = "gpt-4o",
+        default_model: str = "llama3:8b",
     ):
         self.config = config
         self.backend = backend

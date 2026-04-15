@@ -1,15 +1,14 @@
 """Experiment runner — orchestrates the full self-improvement experiment.
 
 Flow:
-  1. Load benchmark from HuggingFace (GSM8K / MMLU / TruthfulQA)
+  1. Load benchmark (GSM8K / MMLU / TruthfulQA or local JSONL)
   2. Split 80/20 train/test
   3. Partition train into N per-cycle chunks (unique questions each cycle)
   4. Baseline: evaluate on held-out test set
   5. For each cycle:
      a. Run competitive rounds on that cycle's training chunk
-     b. Sleep cycle: curate → build datasets → fine-tune
-     c. Swap specialist models to fine-tuned versions
-     d. Evaluate on held-out test set again
+     b. Sleep cycle: curate → build datasets → compute metrics
+     c. Evaluate on held-out test set again
   6. Final comparison: baseline vs. final score
 """
 
@@ -204,13 +203,13 @@ class ExperimentRunner:
         test_items: list[BenchmarkItem],
         benchmark: Benchmark,
     ) -> CycleResult:
-        """Run one experiment cycle: compete → sleep → fine-tune → swap → test."""
+        """Run one experiment cycle: compete → sleep → test."""
         from src.eval.benchmarks.jsonl_benchmark import JsonlBenchmark
+        from src.eval.metrics import MetricsTracker
         from src.memory.experience_log import ExperienceLog
         from src.training.competitive import CompetitiveTrainer
         from src.training.curator import Curator
         from src.training.dataset_builder import DatasetBuilder
-        from src.training.fine_tuner import FineTuner
         from src.training.sleep_cycle import SleepCycle
 
         cycle_result = CycleResult(
@@ -219,7 +218,6 @@ class ExperimentRunner:
         )
 
         # ── Competitive rounds ──
-        # Write cycle training items as a temporary JSONL for the benchmark loader
         cycle_jsonl = self.output_dir / f"cycle_{cycle_num}_train.jsonl"
         with open(cycle_jsonl, "w") as f:
             for item in train_items:
@@ -246,40 +244,21 @@ class ExperimentRunner:
         cycle_result.agent_b_wins = summary["agent_b_wins"]
         cycle_result.ties = summary["ties"]
 
-        # ── Sleep cycle (curate + build datasets + fine-tune) ──
-        from src.eval.metrics import MetricsTracker
-
+        # ── Sleep cycle (curate + build datasets + metrics) ──
         curator = Curator()
         builder = DatasetBuilder()
         metrics_tracker = MetricsTracker(metrics_dir=str(self.output_dir / "metrics"))
-
-        tuner: FineTuner | None = None
-        if self.config.fine_tune:
-            tuner = FineTuner(
-                base_model=self.config.base_model,
-                output_dir=str(self.output_dir / "checkpoints"),
-            )
 
         sleep_cycle = SleepCycle(
             experience_log=exp_log,
             curator=curator,
             dataset_builder=builder,
             metrics_tracker=metrics_tracker,
-            fine_tuner=tuner,
             cycle_num=cycle_num,
         )
 
         self.console.print("  Running sleep cycle...")
-        sleep_report = sleep_cycle.run(
-            fine_tune=self.config.fine_tune,
-            wait=self.config.wait_for_fine_tune,
-        )
-        cycle_result.fine_tune_jobs = sleep_report.fine_tune_jobs
-
-        # ── Model swap — use fine-tuned models for subsequent cycles ──
-        if self.config.fine_tune and self.config.wait_for_fine_tune and tuner:
-            swapped = self._swap_models(tuner, cycle_result)
-            cycle_result.fine_tuned_models = swapped
+        sleep_cycle.run()
 
         # ── Evaluate on held-out test set ──
         self.console.print(f"  Evaluating on {len(test_items)} test items...")
@@ -290,32 +269,6 @@ class ExperimentRunner:
         cycle_result.per_category_scores = test_metrics["per_category"]
 
         return cycle_result
-
-    def _swap_models(
-        self,
-        tuner: Any,
-        cycle_result: CycleResult,
-    ) -> dict[str, str]:
-        """Check fine-tuning job results and swap specialist models."""
-        swapped: dict[str, str] = {}
-        for job_id in cycle_result.fine_tune_jobs:
-            try:
-                status = tuner.get_job_status(job_id)
-                if status["status"] == "succeeded" and status.get("fine_tuned_model"):
-                    ft_model = status["fine_tuned_model"]
-                    # Determine which specialist this job was for
-                    for name, specialist in self.specialists.items():
-                        if name not in swapped:
-                            specialist.model = ft_model
-                            swapped[name] = ft_model
-                            self.console.print(f"  Swapped {name} → {ft_model}")
-                            break
-            except Exception as exc:
-                self.console.print(
-                    f"  [yellow]Could not check job {job_id}: {exc}[/yellow]"
-                )
-        self._model_history.append(swapped)
-        return swapped
 
     def _save_report(self, report: ExperimentReport) -> None:
         """Save the full experiment report as JSON."""
@@ -349,7 +302,6 @@ class ExperimentRunner:
             cycle_table.add_column("Train Items", justify="right")
             cycle_table.add_column("Score", justify="right")
             cycle_table.add_column("Correct", justify="right")
-            cycle_table.add_column("FT Jobs", justify="right")
 
             for c in report.cycles:
                 score_style = "green" if c.test_score > report.baseline_score else "red"
@@ -358,6 +310,5 @@ class ExperimentRunner:
                     str(c.train_items_used),
                     f"[{score_style}]{c.test_score:.3f}[/{score_style}]",
                     f"{c.test_correct}/{c.test_total}",
-                    str(len(c.fine_tune_jobs)),
                 )
             self.console.print(cycle_table)

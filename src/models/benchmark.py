@@ -53,10 +53,7 @@ class SleepReport(BaseModel):
     routing_accuracy_after: float = 0.0
     checkpoints_saved: list[str] = Field(default_factory=list)
     vindication_cases_found: int = 0
-    fine_tune_jobs: list[str] = Field(
-        default_factory=list, description="OpenAI fine-tuning job IDs"
-    )
     status: str = Field(
         default="success",
-        description="success | no_finetune_data | partial_failure | failed",
+        description="success | no_data | failed",
     )

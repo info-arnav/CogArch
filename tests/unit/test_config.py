@@ -10,7 +10,7 @@ class TestConfigLoader:
         cfg = load_config()
         assert "coordinator" in cfg
         assert "specialists" in cfg
-        assert cfg["coordinator"]["model_id"] == "gpt-4o-mini"
+        assert cfg["coordinator"]["model_id"] == "llama3:8b"
 
     def test_load_specialist_config(self) -> None:
         cfg = load_specialist_config("logical")

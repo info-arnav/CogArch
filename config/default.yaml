@@ -2,13 +2,13 @@
 
 # ── Model Configuration ──
 coordinator:
-  model_id: "gpt-4o-mini"
+  model_id: "llama3:8b"
   max_tokens: 1024
   temperature: 0.3
 
 specialists:
   enabled: ["logical", "creative", "skeptical", "empathetic"]
-  model_id: "gpt-4o"
+  model_id: "llama3:8b"
   max_tokens: 2048
 
 # ── Inference ──
@@ -16,6 +16,10 @@ inference:
   enable_revision_pass: true
   revision_max_tokens: 512
   parallel_backend: "asyncio"
+
+# ── Ollama ──
+ollama:
+  base_url: "http://localhost:11434"
 
 # ── Self-State ──
 self_state:
@@ -38,15 +42,6 @@ sleep_cycle:
     vindication_weight: 3
     disagreement_weight: 2
     loss_weight: 3
-  fine_tuning:
-    method: "lora"
-    lora_r: 16
-    lora_alpha: 32
-    lora_dropout: 0.05
-    winner_epochs: 3
-    loser_epochs: 1
-    learning_rate: 2e-4
-    batch_size: 4
 
 # ── Competitive Training ──
 competitive:

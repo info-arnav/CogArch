@@ -15,7 +15,7 @@ class Coordinator:
     def __init__(
         self,
         backend: LLMBackend,
-        model: str = "gpt-4o-mini",
+        model: str = "llama3:8b",
         temperature: float = 0.3,
         max_tokens: int = 1024,
     ):

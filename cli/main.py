@@ -26,7 +26,7 @@ def infer(
     from rich.table import Table
 
     from src.config import load_all_specialist_configs, load_config
-    from src.inference.backends.openai import OpenAIBackend
+    from src.inference.backends.ollama import OllamaBackend
     from src.inference.coordinator import Coordinator
     from src.inference.orchestrator import Orchestrator
     from src.inference.specialist import Specialist
@@ -38,7 +38,10 @@ def infer(
     async def _run() -> None:
         # Load config
         cfg = load_config(config_path)
-        backend = OpenAIBackend()
+        ollama_cfg = cfg.get("ollama", {})
+        backend = OllamaBackend(
+            base_url=ollama_cfg.get("base_url", "http://localhost:11434")
+        )
 
         # Build specialists
         specialist_names = cfg["specialists"]["enabled"]
@@ -151,7 +154,7 @@ def compete(
     from src.config import load_all_specialist_configs, load_config
     from src.eval.benchmarks.jsonl_benchmark import JsonlBenchmark
     from src.eval.scorer import Scorer
-    from src.inference.backends.openai import OpenAIBackend
+    from src.inference.backends.ollama import OllamaBackend
     from src.inference.coordinator import Coordinator
     from src.inference.orchestrator import Orchestrator
     from src.inference.specialist import Specialist
@@ -159,7 +162,7 @@ def compete(
 
     console = Console()
 
-    def _build_orchestrator(cfg: dict, backend: OpenAIBackend) -> Orchestrator:
+    def _build_orchestrator(cfg: dict, backend: OllamaBackend) -> Orchestrator:
         specialist_names = cfg["specialists"]["enabled"]
         specialist_configs = load_all_specialist_configs(specialist_names)
         default_model = cfg["specialists"]["model_id"]
@@ -183,7 +186,10 @@ def compete(
         from src.training.competitive import CompetitiveTrainer
 
         cfg = load_config(config_path)
-        backend = OpenAIBackend()
+        ollama_cfg = cfg.get("ollama", {})
+        backend = OllamaBackend(
+            base_url=ollama_cfg.get("base_url", "http://localhost:11434")
+        )
         agent_a = _build_orchestrator(cfg, backend)
         agent_b = _build_orchestrator(cfg, backend)
 
@@ -224,18 +230,8 @@ def sleep(
     config_path: str = typer.Option(
         "config/default.yaml", "--config", "-c", help="Path to config file"
     ),
-    fine_tune: bool = typer.Option(
-        False,
-        "--fine-tune",
-        help="Submit OpenAI fine-tuning jobs after dataset assembly",
-    ),
-    wait: bool = typer.Option(
-        False,
-        "--wait",
-        help="Block until fine-tuning jobs complete (use with --fine-tune)",
-    ),
 ) -> None:
-    """Run a sleep cycle: curate interactions, build datasets, optionally fine-tune."""
+    """Run a sleep cycle: curate interactions and build training datasets."""
     load_dotenv()
 
     from rich.console import Console
@@ -246,14 +242,12 @@ def sleep(
     from src.memory.experience_log import ExperienceLog
     from src.training.curator import Curator
     from src.training.dataset_builder import DatasetBuilder
-    from src.training.fine_tuner import FineTuner
     from src.training.sleep_cycle import SleepCycle
 
     console = Console()
     cfg = load_config(config_path)
     sc_cfg = cfg.get("sleep_cycle", {})
     cur_cfg = sc_cfg.get("curation", {})
-    ft_cfg = sc_cfg.get("fine_tuning", {})
 
     log = ExperienceLog(cfg["experience_log"]["path"])
     curator = Curator(
@@ -265,29 +259,17 @@ def sleep(
     builder = DatasetBuilder()
     metrics = MetricsTracker()
 
-    tuner: FineTuner | None = None
-    if fine_tune:
-        tuner = FineTuner(
-            base_model=ft_cfg.get("base_model", "gpt-4o-mini-2024-07-18"),
-            n_epochs=ft_cfg.get("n_epochs", ft_cfg.get("winner_epochs", 3)),
-        )
-
     cycle = SleepCycle(
         experience_log=log,
         curator=curator,
         dataset_builder=builder,
         metrics_tracker=metrics,
-        fine_tuner=tuner,
     )
 
     console.print("\n[bold]Sleep Cycle[/bold]\n")
 
-    status_msg = "[bold green]Curating and building datasets..."
-    if fine_tune:
-        status_msg = "[bold green]Curating, building datasets, and fine-tuning..."
-
-    with console.status(status_msg):
-        report = cycle.run(fine_tune=fine_tune, wait=wait)
+    with console.status("[bold green]Curating and building datasets..."):
+        report = cycle.run()
 
     table = Table(title="Sleep Report")
     table.add_column("Metric", style="cyan")
@@ -299,11 +281,6 @@ def sleep(
     table.add_row("Routing accuracy", f"{report.routing_accuracy_before:.2f}")
     table.add_row("Status", report.status)
     console.print(table)
-
-    if report.fine_tune_jobs:
-        console.print("\n[dim]Fine-tuning jobs:[/dim]")
-        for job_id in report.fine_tune_jobs:
-            console.print(f"  {job_id}")
 
     if report.checkpoints_saved:
         console.print("\n[dim]Datasets/checkpoints saved:[/dim]")
@@ -387,7 +364,7 @@ def bench(
     from src.config import load_all_specialist_configs, load_config
     from src.eval.benchmarks.jsonl_benchmark import JsonlBenchmark
     from src.eval.scorer import Scorer
-    from src.inference.backends.openai import OpenAIBackend
+    from src.inference.backends.ollama import OllamaBackend
     from src.inference.coordinator import Coordinator
     from src.inference.orchestrator import Orchestrator
     from src.inference.specialist import Specialist
@@ -396,7 +373,10 @@ def bench(
 
     async def _run() -> None:
         cfg = load_config(config_path)
-        backend = OpenAIBackend()
+        ollama_cfg = cfg.get("ollama", {})
+        backend = OllamaBackend(
+            base_url=ollama_cfg.get("base_url", "http://localhost:11434")
+        )
 
         specialist_names = cfg["specialists"]["enabled"]
         specialist_configs = load_all_specialist_configs(specialist_names)
@@ -502,72 +482,6 @@ def bench(
     asyncio.run(_run())
 
 
-@app.command(name="finetune-status")
-def finetune_status(
-    job_id: str = typer.Argument("", help="Specific job ID to check (optional)"),
-    cycle: int = typer.Option(
-        0, "--cycle", help="Show jobs from a specific sleep cycle manifest"
-    ),
-) -> None:
-    """Check the status of OpenAI fine-tuning jobs."""
-    load_dotenv()
-
-    import json
-
-    from rich.console import Console
-    from rich.table import Table
-
-    from src.training.fine_tuner import FineTuner
-
-    console = Console()
-    tuner = FineTuner()
-
-    if job_id:
-        status = tuner.get_job_status(job_id)
-        table = Table(title=f"Fine-tuning Job: {job_id}")
-        table.add_column("Field", style="cyan")
-        table.add_column("Value")
-        for key, val in status.items():
-            table.add_row(key, str(val) if val is not None else "-")
-        console.print(table)
-    elif cycle > 0:
-        manifest_path = tuner.output_dir / f"finetune_cycle_{cycle}.json"
-        if not manifest_path.exists():
-            console.print(f"[yellow]No manifest found for cycle {cycle}[/yellow]")
-            raise typer.Exit()
-        with open(manifest_path) as f:
-            manifest = json.load(f)
-
-        table = Table(title=f"Cycle {cycle} Fine-tuning Jobs")
-        table.add_column("Specialist", style="cyan")
-        table.add_column("Job ID")
-        table.add_column("Status")
-        table.add_column("Examples", justify="right")
-        table.add_column("Fine-tuned Model")
-
-        for job in manifest.get("jobs", []):
-            if "job_id" in job:
-                live_status = tuner.get_job_status(job["job_id"])
-                table.add_row(
-                    job.get("specialist", ""),
-                    job["job_id"],
-                    live_status.get("status", ""),
-                    str(job.get("num_examples", "")),
-                    live_status.get("fine_tuned_model") or "-",
-                )
-            else:
-                table.add_row(
-                    job.get("specialist", ""),
-                    "-",
-                    job.get("status", ""),
-                    str(job.get("num_examples", job.get("reason", ""))),
-                    "-",
-                )
-        console.print(table)
-    else:
-        console.print("[yellow]Provide a --cycle number or job ID argument.[/yellow]")
-
-
 @app.command()
 def experiment(
     benchmark: str = typer.Argument(
@@ -583,14 +497,6 @@ def experiment(
         "--metric",
         "-m",
         help="Scoring metric: exact_match, fuzzy_match, llm_judge",
-    ),
-    fine_tune: bool = typer.Option(
-        True, "--fine-tune/--no-fine-tune", help="Submit fine-tuning jobs each cycle"
-    ),
-    wait: bool = typer.Option(
-        True,
-        "--wait/--no-wait",
-        help="Wait for fine-tuning to complete before next cycle",
     ),
     seed: int = typer.Option(42, "--seed", help="Random seed for reproducible splits"),
     config_path: str = typer.Option(
@@ -610,7 +516,7 @@ def experiment(
     from src.config import load_all_specialist_configs, load_config
     from src.eval.experiment import ExperimentRunner
     from src.eval.scorer import Scorer
-    from src.inference.backends.openai import OpenAIBackend
+    from src.inference.backends.ollama import OllamaBackend
     from src.inference.coordinator import Coordinator
     from src.inference.orchestrator import Orchestrator
     from src.inference.specialist import Specialist
@@ -620,7 +526,10 @@ def experiment(
 
     async def _run() -> None:
         cfg = load_config(config_path)
-        backend = OpenAIBackend()
+        ollama_cfg = cfg.get("ollama", {})
+        backend = OllamaBackend(
+            base_url=ollama_cfg.get("base_url", "http://localhost:11434")
+        )
 
         # Build specialists
         specialist_names = cfg["specialists"]["enabled"]
@@ -648,15 +557,11 @@ def experiment(
 
         scorer = Scorer(backend=backend)
 
-        ft_cfg = cfg.get("sleep_cycle", {}).get("fine_tuning", {})
         exp_config = ExperimentConfig(
             benchmark_name=benchmark,
             num_cycles=cycles,
             test_ratio=test_ratio,
             metric=metric,
-            fine_tune=fine_tune,
-            wait_for_fine_tune=wait,
-            base_model=ft_cfg.get("base_model", "gpt-4o-mini-2024-07-18"),
             seed=seed,
         )
 

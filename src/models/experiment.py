@@ -14,11 +14,6 @@ class CycleResult(BaseModel):
     agent_a_wins: int = 0
     agent_b_wins: int = 0
     ties: int = 0
-    fine_tune_jobs: list[str] = Field(default_factory=list)
-    fine_tuned_models: dict[str, str] = Field(
-        default_factory=dict,
-        description="Specialist name → fine-tuned model ID",
-    )
     test_score: float = 0.0
     test_correct: int = 0
     test_total: int = 0
@@ -33,9 +28,6 @@ class ExperimentConfig(BaseModel):
     per_cycle_items: int = 100
     test_ratio: float = 0.2
     metric: str = "exact_match"
-    fine_tune: bool = True
-    wait_for_fine_tune: bool = True
-    base_model: str = "gpt-4o-mini-2024-07-18"
     seed: int = 42
 
 

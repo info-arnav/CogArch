@@ -58,7 +58,7 @@ def _make_records(count: int = 5) -> list[InteractionRecord]:
     return records
 
 
-class TestSleepCycleNoFineTune:
+class TestSleepCycle:
     """Sleep cycle without fine-tuning (dataset assembly only)."""
 
     def test_run_produces_report(self, tmp_path: Path) -> None:
@@ -77,7 +77,6 @@ class TestSleepCycleNoFineTune:
         assert report.status == "success"
         assert report.items_curated == 5
         assert report.training_examples_generated > 0
-        assert report.fine_tune_jobs == []
 
     def test_run_empty_log(self, tmp_path: Path) -> None:
         log = ExperienceLog(str(tmp_path / "log"))
@@ -91,24 +90,6 @@ class TestSleepCycleNoFineTune:
         report = cycle.run()
         assert report.items_curated == 0
         assert report.training_examples_generated == 0
-
-    def test_fine_tune_flag_without_tuner(self, tmp_path: Path) -> None:
-        """fine_tune=True with no FineTuner configured should not crash."""
-        log = ExperienceLog(str(tmp_path / "log"))
-        for r in _make_records(3):
-            log.append(r)
-
-        cycle = SleepCycle(
-            experience_log=log,
-            curator=Curator(),
-            dataset_builder=DatasetBuilder(output_dir=tmp_path / "training"),
-            metrics_tracker=MetricsTracker(metrics_dir=str(tmp_path / "metrics")),
-            fine_tuner=None,
-        )
-
-        # Should not raise even with fine_tune=True
-        report = cycle.run(fine_tune=True)
-        assert report.status == "no_finetune_data"
 
     def test_metrics_saved_per_cycle(self, tmp_path: Path) -> None:
         log = ExperienceLog(str(tmp_path / "log"))

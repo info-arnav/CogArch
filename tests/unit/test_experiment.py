@@ -61,7 +61,6 @@ class TestExperimentConfig:
         cfg = ExperimentConfig(benchmark_name="gsm8k")
         assert cfg.num_cycles == 5
         assert cfg.test_ratio == 0.2
-        assert cfg.fine_tune is True
         assert cfg.seed == 42
 
     def test_custom_values(self) -> None:
@@ -69,7 +68,6 @@ class TestExperimentConfig:
             benchmark_name="mmlu",
             num_cycles=3,
             test_ratio=0.3,
-            fine_tune=False,
             seed=123,
         )
         assert cfg.num_cycles == 3
@@ -100,8 +98,6 @@ class TestCycleResult:
     def test_defaults(self) -> None:
         result = CycleResult(cycle=1)
         assert result.train_items_used == 0
-        assert result.fine_tune_jobs == []
-        assert result.fine_tuned_models == {}
 
     def test_with_data(self) -> None:
         result = CycleResult(
@@ -110,8 +106,5 @@ class TestCycleResult:
             test_score=0.75,
             test_correct=15,
             test_total=20,
-            fine_tune_jobs=["ft-123"],
-            fine_tuned_models={"logical": "ft:gpt-4o:test"},
         )
         assert result.test_score == 0.75
-        assert len(result.fine_tune_jobs) == 1

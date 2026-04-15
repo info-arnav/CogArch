@@ -58,8 +58,17 @@ class MockBackend(LLMBackend):
             if key in user_msg:
                 return response
 
-        # Default: coordinator or specialist based on model name
-        if "mini" in model.lower() or "coordinator" in model.lower():
+        # Default: coordinator or specialist based on prompt content
+        sys_msg = (
+            messages[0]["content"]
+            if messages and messages[0]["role"] == "system"
+            else ""
+        )
+        if (
+            "synthesize" in sys_msg.lower()
+            or "coordinator" in sys_msg.lower()
+            or "final_answer" in user_msg.lower()
+        ):
             return self._default_coordinator_response
         return self._default_specialist_response
 
@@ -88,7 +97,18 @@ class CorrectAnswerBackend(MockBackend):
         # Check for known question -> answer mapping
         for question, answer in self._answer_map.items():
             if question in user_msg:
-                if "mini" in model.lower():
+                # Detect coordinator by system prompt content
+                sys_msg = (
+                    messages[0]["content"]
+                    if messages and messages[0]["role"] == "system"
+                    else ""
+                )
+                is_coordinator = (
+                    "synthesize" in sys_msg.lower()
+                    or "coordinator" in sys_msg.lower()
+                    or "final_answer" in user_msg.lower()
+                )
+                if is_coordinator:
                     return json.dumps(
                         {
                             "final_answer": answer,

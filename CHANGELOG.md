@@ -9,37 +9,39 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Switched from OpenAI to Ollama** — all inference now runs locally via Llama 3 8B
+  - Replaced `OpenAIBackend` with `OllamaBackend` (httpx async client → `POST /api/chat`)
+  - Removed `openai` Python dependency entirely
+  - Removed `fine_tuner.py` and all fine-tuning logic (not applicable to local models)
+  - Removed `finetune-status` CLI command
+  - Removed `--fine-tune` and `--wait` flags from `sleep` and `experiment` commands
+  - Removed `fine_tune_jobs` / `fine_tuned_models` from data models
+  - Removed `[training]` extras (torch, transformers, peft)
+  - Updated config to use `llama3:8b` for all specialists and coordinator
+
 ### Added
 - Self-improvement experiment pipeline
-  - `experiment` CLI command: `cogarch experiment gsm8k --cycles 5 --fine-tune`
-  - ExperimentRunner: baseline → N competitive/fine-tune cycles → final eval
+  - `experiment` CLI command: `cogarch experiment gsm8k --cycles 5`
+  - ExperimentRunner: baseline → N competitive/sleep cycles → final eval
   - BenchmarkSplitter: deterministic train/test split with per-cycle unique partitioning
   - No question reuse across cycles — each cycle trains on a fresh chunk
-  - Model swap mechanism: specialist models auto-updated to fine-tuned versions
   - Full experiment report with per-cycle progress and improvement metrics
   - Report saved as JSON to `data/experiments/`
-- HuggingFace benchmark loaders (via `datasets` library)
+- Local benchmark loaders (JSONL files, no HuggingFace dependency)
   - GSM8KBenchmark: grade school math with numeric answer extraction
   - MMLUBenchmark: 57-subject multiple choice with letter-based scoring
   - TruthfulQABenchmark: free-form truthfulness with fuzzy matching
   - Factory function `load_benchmark("gsm8k")` for easy instantiation
 - Experiment data models (Pydantic): ExperimentConfig, CycleResult, ExperimentReport
-- OpenAI fine-tuning integration
-  - FineTuner: prepares chat-format JSONL, uploads to OpenAI, creates/monitors fine-tuning jobs
-  - `--fine-tune` and `--wait` flags on `sleep` CLI command
-  - `finetune-status` CLI command to check job status and cycle manifests
-  - Minimum 10-example threshold per specialist before fine-tuning
-  - Job manifest saved per cycle at `data/checkpoints/finetune_cycle_N.json`
 - Benchmark evaluation suite
   - `bench` CLI command: runs pipeline against benchmark with per-item scoring table
   - Supports exact_match, fuzzy_match, and llm_judge metrics
   - Per-category breakdown in results
-- SleepReport now tracks `fine_tune_jobs` (list of OpenAI job IDs)
-- Sleep cycle now supports 4 stages: curate → assemble → fine-tune → validate
 - Integration tests with mock LLM backend
   - MockBackend and CorrectAnswerBackend in tests/conftest.py
   - Full pipeline E2E: inference, competitive rounds, sleep cycle, benchmark evaluation
-- Unit tests: fine-tuner, sleep cycle, splitter, benchmark scoring, experiment models
+- Unit tests: sleep cycle, splitter, benchmark scoring, experiment models
 - Phase 2: Competitive training system
   - CompetitiveTrainer: two agent instances compete on benchmark items
   - JSONL benchmark loader with exact-match and fuzzy-match scoring
@@ -54,12 +56,12 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - MetricsTracker: routing accuracy, vindication rate, coordinator calibration (ECE), consensus quality
   - Benchmark base class (ABC) for pluggable benchmark loaders
   - BenchmarkItem, CompetitiveResult, TrainingExample, SleepReport data models
-- CLI commands: `infer`, `compete`, `sleep`, `dashboard`, `bench`, `experiment`, `finetune-status`
+- CLI commands: `infer`, `compete`, `sleep`, `dashboard`, `bench`, `experiment`
 - Full Phase 1 inference pipeline
   - Specialist class with Round 1 (independent) and Round 2 (revision) reasoning
   - Coordinator class with synthesis prompt and self-state tracking
   - Orchestrator tying specialists and coordinator together with asyncio
-  - OpenAI backend (AsyncOpenAI adapter for GPT-4o / GPT-4o-mini)
+  - Ollama backend (httpx async adapter for Llama 3 8B)
   - YAML-based specialist personality configs (logical, creative, skeptical, empathetic)
   - Coordinator synthesis prompt externalized to prompts/coordinator/synthesis.yaml
   - Experience log (JSONL append-only interaction recording)

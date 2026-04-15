@@ -58,10 +58,7 @@ body:
     attributes:
       label: LLM Backend
       options:
-        - OpenAI
-        - Anthropic
         - Ollama
-        - vLLM
         - Other
     validations:
       required: true

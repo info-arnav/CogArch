@@ -61,4 +61,4 @@ compete:
 	python -m cli.main compete --rounds 50 --benchmark arc-agi
 
 sleep:
-	python -m cli.main sleep --curate --finetune
+	python -m cli.main sleep

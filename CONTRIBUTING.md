@@ -8,7 +8,8 @@ Thank you for your interest in contributing to CogArch. This project is a resear
 - Python 3.10+
 - pip 23+
 - Git
-- OpenAI API key (for GPT-4o/GPT-4o-mini)
+- Ollama installed and running (`ollama serve`)
+- Llama 3 8B model pulled (`ollama pull llama3:8b`)
 
 **Clone and Install:**
 
@@ -22,7 +23,7 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -e ".[dev]"
 
 cp .env.example .env
-# Edit .env and add your OPENAI_API_KEY
+# Ensure Ollama is running on http://localhost:11434
 
 # Install pre-commit hooks
 pre-commit install
