@@ -52,7 +52,7 @@ competitive:
 # ── Fine-tuning (requires GPU + unsloth) ──
 finetuning:
   enabled: true # set false to use in-context learning only
-  base_model: "unsloth/Meta-Llama-3-8B-Instruct-bnb-4bit" # instruct model required for chat templates
+  base_model: "unsloth/llama-3-8b-Instruct-bnb-4bit" # instruct model required for chat templates
   lora_rank: 16
   lora_alpha: 16
   epochs: 3
