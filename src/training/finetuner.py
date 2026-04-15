@@ -147,7 +147,6 @@ class SpecialistFinetuner:
                 processing_class=tokenizer,
                 train_dataset=dataset,
                 args=SFTConfig(
-                    dataset_text_field="text",
                     max_seq_length=self.max_seq_length,
                     dataset_num_proc=1,
                     **_train_kwargs,
@@ -158,7 +157,6 @@ class SpecialistFinetuner:
                 model=model,
                 tokenizer=tokenizer,
                 train_dataset=dataset,
-                dataset_text_field="text",
                 max_seq_length=self.max_seq_length,
                 dataset_num_proc=1,
                 args=TrainingArguments(**_train_kwargs),  # type: ignore[arg-type]
@@ -227,11 +225,20 @@ class SpecialistFinetuner:
                     ),
                 },
             ]
+            text = tokenizer.apply_chat_template(
+                conversation, tokenize=False, add_generation_prompt=False
+            )
+            tokens = tokenizer(
+                text,
+                truncation=True,
+                max_length=self.max_seq_length,
+                padding=False,
+            )
             rows.append(
                 {
-                    "text": tokenizer.apply_chat_template(
-                        conversation, tokenize=False, add_generation_prompt=False
-                    )
+                    "input_ids": tokens["input_ids"],
+                    "attention_mask": tokens["attention_mask"],
+                    "labels": tokens["input_ids"].copy(),
                 }
             )
         return dataset_cls.from_list(rows)
