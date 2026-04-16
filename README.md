@@ -37,7 +37,7 @@ graph TD
         A --> C1[Creative 0.7]
         A --> S1[Skeptical 0.4]
         A --> E1[Empathetic 0.5]
-        L1 & C1 & S1 & E1 --> Coord1[Coordinator<br/>best pass rate wins]
+        L1 & C1 & S1 & E1 --> Coord1[Coordinator]
     end
 
     subgraph Agent B
@@ -45,15 +45,15 @@ graph TD
         B --> C2[Creative 0.7]
         B --> S2[Skeptical 0.4]
         B --> E2[Empathetic 0.5]
-        L2 & C2 & S2 & E2 --> Coord2[Coordinator<br/>best pass rate wins]
+        L2 & C2 & S2 & E2 --> Coord2[Coordinator]
     end
 
-    Coord1 --> Judge[Judge<br/>rank by pass rate]
+    Coord1 --> Judge[Judge: rank by pass rate]
     Coord2 --> Judge
 
-    Judge --> DPO[DPO Pairs<br/>chosen / rejected]
-    DPO --> Finetune[QLoRA Fine-tune<br/>unsloth + DeepSeek-Coder 33B]
-    Finetune --> Eval[HumanEval<br/>Pass@1]
+    Judge --> DPO[DPO Pairs: chosen / rejected]
+    DPO --> Finetune[QLoRA Fine-tune]
+    Finetune --> Eval[HumanEval Pass@1]
 ```
 
 ### Memory System
