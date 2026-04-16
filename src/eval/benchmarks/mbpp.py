@@ -34,10 +34,13 @@ def load(split: str = "train", limit: int | None = None) -> list[CodeProblem]:
             assertions = [a.strip() for a in raw.get("test_list", []) if a.strip()]
             if not assertions:
                 continue
+            prompt_text = (raw.get("text") or raw.get("prompt") or "").strip()
+            if not prompt_text:
+                continue
             problems.append(
                 CodeProblem(
                     task_id=f"mbpp/{raw['task_id']}",
-                    prompt=raw["text"].strip(),
+                    prompt=prompt_text,
                     entry_point=_infer_entry_point(raw.get("code", ""), assertions),
                     test_assertions=assertions,
                     source="mbpp",
