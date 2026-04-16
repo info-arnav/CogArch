@@ -37,7 +37,7 @@ graph TD
         A --> C1[Creative 0.7]
         A --> S1[Skeptical 0.4]
         A --> E1[Empathetic 0.5]
-        L1 & C1 & S1 & E1 --> Coord1[Coordinator\nbest pass rate wins]
+        L1 & C1 & S1 & E1 --> Coord1[Coordinator<br/>best pass rate wins]
     end
 
     subgraph Agent B
@@ -45,15 +45,15 @@ graph TD
         B --> C2[Creative 0.7]
         B --> S2[Skeptical 0.4]
         B --> E2[Empathetic 0.5]
-        L2 & C2 & S2 & E2 --> Coord2[Coordinator\nbest pass rate wins]
+        L2 & C2 & S2 & E2 --> Coord2[Coordinator<br/>best pass rate wins]
     end
 
-    Coord1 --> Judge[Judge\nrank by pass rate]
+    Coord1 --> Judge[Judge<br/>rank by pass rate]
     Coord2 --> Judge
 
-    Judge --> DPO[DPO Pairs\nchosen / rejected]
-    DPO --> Finetune[QLoRA Fine-tune\nunsloth + DeepSeek-Coder 33B]
-    Finetune --> Eval[HumanEval\nPass@1]
+    Judge --> DPO[DPO Pairs<br/>chosen / rejected]
+    DPO --> Finetune[QLoRA Fine-tune<br/>unsloth + DeepSeek-Coder 33B]
+    Finetune --> Eval[HumanEval<br/>Pass@1]
 ```
 
 ### Memory System
@@ -142,9 +142,10 @@ docker compose run --rm cogarch python -m cli.main code-experiment --cycles 3 --
 
 Paste these cells in order into a Colab notebook with an A100 runtime.
 
-**Cell 1 — Install Ollama + pull models**
+**Cell 1 — Install system deps + Ollama + pull models**
 ```bash
 %%bash
+apt-get install -y zstd pciutils -qq
 curl -fsSL https://ollama.com/install.sh | sh
 ollama serve > /tmp/ollama.log 2>&1 &
 sleep 8
@@ -298,4 +299,4 @@ docker-compose.yml            — ollama + cogarch services, data/memory volume
 
 MIT — see [LICENSE.md](LICENSE.md)
 
-Built by [Arnav Gupta](https://github.com/info-arnav) • [Report an issue](https://github.com/info-arnav/CogArch/issues)
+Built by [Arnav Gupta](https://github.com/info-arnav) — vibecoded with Claude Code • [Report an issue](https://github.com/info-arnav/CogArch/issues)
