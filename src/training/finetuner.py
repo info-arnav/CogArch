@@ -58,6 +58,21 @@ class SpecialistFinetuner:
     ) -> str | None:
         """Fine-tune one specialist. Returns new Ollama model name, or None on skip/fail."""
         try:
+            return self._run_inner(specialist_name, dataset_path, system_prompt)
+        except Exception as exc:
+            self.console.print(
+                f"  [yellow]Fine-tune failed for {specialist_name} "
+                f"({type(exc).__name__}: {exc}) — skipping[/yellow]"
+            )
+            return None
+
+    def _run_inner(
+        self,
+        specialist_name: str,
+        dataset_path: str | Path,
+        system_prompt: str,
+    ) -> str | None:
+        try:
             import torch
             from datasets import Dataset
             from transformers import Trainer, TrainingArguments
@@ -116,16 +131,19 @@ class SpecialistFinetuner:
         adapter_dir = self.output_dir / specialist_name / version_tag / "adapter"
         adapter_dir.mkdir(parents=True, exist_ok=True)
 
+        total_steps = max(1, (len(examples) * self.epochs) // self.batch_size)
+        warmup = min(5, total_steps // 4)
+
         _train_kwargs: dict[str, Any] = dict(
             output_dir=str(adapter_dir),
             num_train_epochs=self.epochs,
             per_device_train_batch_size=self.batch_size,
             gradient_accumulation_steps=self.grad_accumulation,
-            warmup_steps=5,
+            warmup_steps=warmup,
             learning_rate=2e-4,
             fp16=not torch.cuda.is_bf16_supported(),
             bf16=torch.cuda.is_bf16_supported(),
-            logging_steps=10,
+            logging_steps=max(1, total_steps // 3),
             save_strategy="no",
             report_to="none",
             optim="adamw_8bit",
@@ -147,6 +165,10 @@ class SpecialistFinetuner:
             str(gguf_dir), tokenizer, quantization_method="q4_k_m"
         )
 
+        # Free VRAM before next specialist
+        del model
+        torch.cuda.empty_cache()
+
         gguf_path = self._find_gguf(gguf_dir)
         if gguf_path is None:
             self.console.print(f"  [red]GGUF not found in {gguf_dir} — aborting[/red]")
@@ -156,6 +178,8 @@ class SpecialistFinetuner:
         model_name = self._register_ollama(
             specialist_name, version_tag, gguf_path, system_prompt
         )
+        if model_name is None:
+            return None
         self.console.print(f"  [green]Ollama model created: {model_name}[/green]")
         return model_name
 
@@ -240,7 +264,7 @@ class SpecialistFinetuner:
         version_tag: str,
         gguf_path: Path,
         system_prompt: str,
-    ) -> str:
+    ) -> str | None:
         model_name = f"{specialist_name}-{version_tag}"
         modelfile = (
             f"FROM {gguf_path.resolve()}\n"
@@ -260,6 +284,12 @@ class SpecialistFinetuner:
                 capture_output=True,
                 text=True,
             )
+            return model_name
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            self.console.print(
+                f"  [yellow]ollama register failed for {model_name} "
+                f"({type(exc).__name__}: {exc}) — skipping[/yellow]"
+            )
+            return None
         finally:
             mf_path.unlink(missing_ok=True)
-        return model_name
