@@ -216,6 +216,16 @@ class SpecialistFinetuner:
                     "labels": tokens["input_ids"].copy(),
                 }
             )
+
+        # Pad all sequences to the same length so the collator can stack them
+        pad_id = tokenizer.pad_token_id or 0
+        max_len = max(len(r["input_ids"]) for r in rows)
+        for row in rows:
+            pad_len = max_len - len(row["input_ids"])
+            row["input_ids"] = row["input_ids"] + [pad_id] * pad_len
+            row["attention_mask"] = row["attention_mask"] + [0] * pad_len
+            row["labels"] = row["labels"] + [-100] * pad_len  # -100 ignored in loss
+
         return dataset_cls.from_list(rows)
 
     def _find_gguf(self, gguf_dir: Path) -> Path | None:
