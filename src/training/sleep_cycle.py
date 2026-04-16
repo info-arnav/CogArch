@@ -54,10 +54,22 @@ class SleepCycle:
         saved_paths = self.dataset_builder.save(datasets)
 
         if self.finetuner and self.registry:
-            for name, path in saved_paths.items():
-                new_model = self.finetuner.run(
-                    name, path, self.system_prompts.get(name, "")
-                )
+            dpo_datasets = self.dataset_builder.build_dpo(curated)
+            dpo_paths = self.dataset_builder.save_dpo(dpo_datasets)
+
+            for name, sft_path in saved_paths.items():
+                system_prompt = self.system_prompts.get(name, "")
+                new_model: str | None = None
+
+                # Prefer DPO when enough preference pairs are available
+                dpo_path = dpo_paths.get(name)
+                if dpo_path and dpo_path.exists():
+                    new_model = self.finetuner.run_dpo(name, dpo_path, system_prompt)
+
+                # Fall back to SFT if DPO was skipped or failed
+                if new_model is None:
+                    new_model = self.finetuner.run(name, sft_path, system_prompt)
+
                 if new_model:
                     exs = datasets.get(name, [])
                     win_rate = 0.0

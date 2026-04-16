@@ -38,6 +38,33 @@ class TrainingExample(BaseModel):
     )
     weight: float = Field(default=1.0, description="Loss multiplier")
     source_interaction_id: str = ""
+    reasoning_trace: str = Field(
+        default="",
+        description="Actual reasoning trace from the specialist (or winner for learn_from_winner)",
+    )
+    coordinator_confidence: float = Field(
+        default=0.8,
+        description="Real confidence score from the coordinator for this interaction",
+    )
+    attribution_weight: float = Field(
+        default=1.0,
+        description="How much the coordinator weighted this specialist",
+    )
+
+
+class DPOExample(BaseModel):
+    """A preference pair for DPO fine-tuning."""
+
+    specialist_name: str
+    prompt: str = Field(..., description="The user question (plain text)")
+    chosen: str = Field(
+        ..., description="Preferred assistant response (winner's trace)"
+    )
+    rejected: str = Field(
+        ..., description="Dispreferred assistant response (loser's trace)"
+    )
+    training_signal: str = Field(default="dpo", description="'dpo_win' or 'dpo_learn'")
+    source_interaction_id: str = ""
 
 
 class SleepReport(BaseModel):

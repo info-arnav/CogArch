@@ -197,6 +197,139 @@ class SpecialistFinetuner:
                         continue
         return examples
 
+    def run_dpo(
+        self,
+        specialist_name: str,
+        dpo_dataset_path: str | Path,
+        system_prompt: str,
+    ) -> str | None:
+        """DPO fine-tune using preference pairs. Returns Ollama model name or None."""
+        try:
+            return self._run_dpo_inner(specialist_name, dpo_dataset_path, system_prompt)
+        except Exception as exc:
+            self.console.print(
+                f"  [yellow]DPO failed for {specialist_name} "
+                f"({type(exc).__name__}: {exc}) — skipping[/yellow]"
+            )
+            return None
+
+    def _run_dpo_inner(
+        self,
+        specialist_name: str,
+        dpo_dataset_path: str | Path,
+        system_prompt: str,
+    ) -> str | None:
+        try:
+            import torch
+            from datasets import Dataset
+            from trl import DPOConfig, DPOTrainer
+            from unsloth import FastLanguageModel
+            from unsloth.chat_templates import get_chat_template
+        except ImportError:
+            self.console.print(
+                f"  [yellow]DPO deps (trl DPOConfig) not installed — "
+                f"skipping DPO for {specialist_name}[/yellow]"
+            )
+            return None
+
+        examples = self._load_examples(Path(dpo_dataset_path))
+        if len(examples) < self.min_examples:
+            self.console.print(
+                f"  [dim]{specialist_name}: {len(examples)} DPO pairs "
+                f"< min {self.min_examples} — skipping[/dim]"
+            )
+            return None
+
+        self.console.print(
+            f"  [cyan]DPO fine-tuning {specialist_name} "
+            f"({len(examples)} pairs, {self.epochs} epochs)...[/cyan]"
+        )
+
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=self.base_model,
+            max_seq_length=self.max_seq_length,
+            load_in_4bit=True,
+        )
+        tokenizer = get_chat_template(tokenizer, chat_template="llama-3")
+        model = FastLanguageModel.get_peft_model(
+            model,
+            r=self.lora_rank,
+            target_modules=[
+                "q_proj",
+                "k_proj",
+                "v_proj",
+                "o_proj",
+                "gate_proj",
+                "up_proj",
+                "down_proj",
+            ],
+            lora_alpha=self.lora_alpha,
+            lora_dropout=0,
+            bias="none",
+            use_gradient_checkpointing="unsloth",
+        )
+
+        dataset = self._build_dpo_dataset(examples, system_prompt, tokenizer, Dataset)
+
+        version_tag = date.today().isoformat()
+        adapter_dir = self.output_dir / specialist_name / version_tag / "adapter"
+        adapter_dir.mkdir(parents=True, exist_ok=True)
+
+        total_steps = max(1, (len(examples) * self.epochs) // self.batch_size)
+        warmup = min(5, total_steps // 4)
+
+        dpo_config = DPOConfig(
+            output_dir=str(adapter_dir),
+            num_train_epochs=self.epochs,
+            per_device_train_batch_size=self.batch_size,
+            gradient_accumulation_steps=self.grad_accumulation,
+            warmup_steps=warmup,
+            learning_rate=5e-5,  # lower LR than SFT — DPO is more sensitive
+            fp16=not torch.cuda.is_bf16_supported(),
+            bf16=torch.cuda.is_bf16_supported(),
+            logging_steps=max(1, total_steps // 3),
+            save_strategy="no",
+            report_to="none",
+            optim="adamw_8bit",
+            beta=0.1,  # DPO temperature: how strongly to prefer chosen over rejected
+            max_prompt_length=self.max_seq_length // 2,
+            max_length=self.max_seq_length,
+        )
+
+        trainer = DPOTrainer(
+            model=model,
+            args=dpo_config,
+            train_dataset=dataset,
+            processing_class=tokenizer,
+        )
+        trainer.train()
+        model.save_pretrained(str(adapter_dir))
+        tokenizer.save_pretrained(str(adapter_dir))
+        self.console.print(f"  [dim]DPO adapter saved → {adapter_dir}[/dim]")
+
+        gguf_dir = self.output_dir / specialist_name / version_tag / "gguf"
+        gguf_dir.mkdir(parents=True, exist_ok=True)
+        model.save_pretrained_gguf(
+            str(gguf_dir), tokenizer, quantization_method="q4_k_m"
+        )
+
+        del model
+        torch.cuda.empty_cache()
+
+        gguf_path = self._find_gguf(gguf_dir)
+        if gguf_path is None:
+            self.console.print(f"  [red]GGUF not found in {gguf_dir} — aborting[/red]")
+            return None
+        self.console.print(f"  [dim]DPO GGUF exported → {gguf_path.name}[/dim]")
+
+        model_name = self._register_ollama(
+            specialist_name, version_tag, gguf_path, system_prompt
+        )
+        if model_name is None:
+            return None
+        self.console.print(f"  [green]Ollama DPO model created: {model_name}[/green]")
+        return model_name
+
     def _build_dataset(
         self,
         examples: list[dict[str, Any]],
@@ -204,21 +337,30 @@ class SpecialistFinetuner:
         tokenizer: Any,
         dataset_cls: Any,
     ) -> Any:
-        confidence_map = {
+        _confidence_fallback = {
             "win": "0.9",
             "vindicated": "0.85",
             "learn_from_winner": "0.75",
         }
         rows = []
         for ex in examples:
-            confidence = confidence_map.get(ex.get("training_signal", "win"), "0.8")
+            # Use actual reasoning trace if available
+            reasoning = ex.get("reasoning_trace") or "Based on careful analysis."
+            # Use actual coordinator confidence if available, else fall back to signal map
+            coord_conf = ex.get("coordinator_confidence")
+            if coord_conf is not None:
+                confidence = str(round(float(coord_conf), 2))
+            else:
+                confidence = _confidence_fallback.get(
+                    ex.get("training_signal", "win"), "0.8"
+                )
             conversation = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": ex["input"]},
                 {
                     "role": "assistant",
                     "content": (
-                        f"REASONING: Based on careful analysis.\n"
+                        f"REASONING: {reasoning}\n"
                         f"ANSWER: {ex['target_output']}\n"
                         f"CONFIDENCE: {confidence}"
                     ),
@@ -250,6 +392,34 @@ class SpecialistFinetuner:
             row["attention_mask"] = row["attention_mask"] + [0] * pad_len
             row["labels"] = row["labels"] + [-100] * pad_len  # -100 ignored in loss
 
+        return dataset_cls.from_list(rows)
+
+    def _build_dpo_dataset(
+        self,
+        examples: list[dict[str, Any]],
+        system_prompt: str,
+        tokenizer: Any,
+        dataset_cls: Any,
+    ) -> Any:
+        """Format preference pairs for DPOTrainer: prompt / chosen / rejected strings."""
+        rows = []
+        for ex in examples:
+            prompt_msgs = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": ex["prompt"]},
+            ]
+            # add_generation_prompt=True appends the assistant header so DPOTrainer
+            # knows where the response starts
+            prompt = tokenizer.apply_chat_template(
+                prompt_msgs, tokenize=False, add_generation_prompt=True
+            )
+            rows.append(
+                {
+                    "prompt": prompt,
+                    "chosen": ex["chosen"],
+                    "rejected": ex["rejected"],
+                }
+            )
         return dataset_cls.from_list(rows)
 
     def _find_gguf(self, gguf_dir: Path) -> Path | None:
