@@ -1,6 +1,6 @@
 services:
 
-  # ── Ollama — serves the LLM ──────────────────────────────────────────────
+  # ── Ollama — serves the LLM and embeddings ───────────────────────────────
   ollama:
     image: ollama/ollama:latest
     ports:
@@ -23,13 +23,18 @@ services:
       retries: 12
 
   # ── Model pull — runs once, exits when done ───────────────────────────────
-  # Re-run manually with: docker compose run --rm model-pull
+  # Pulls both the coding model and the embedding model.
+  # Re-run with: docker compose run --rm model-pull
   model-pull:
     image: ollama/ollama:latest
     depends_on:
       ollama:
         condition: service_healthy
-    entrypoint: ["ollama", "pull", "deepseek-coder:33b"]
+    entrypoint: >
+      sh -c "
+        ollama pull deepseek-coder:33b &&
+        ollama pull nomic-embed-text
+      "
     environment:
       - OLLAMA_HOST=http://ollama:11434
     profiles: [setup]   # only runs when explicitly included: --profile setup
@@ -43,7 +48,7 @@ services:
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
     volumes:
-      - ./data:/app/data           # experiment outputs
+      - ./data:/app/data           # experiment outputs + memory store
       - ./models:/app/models       # fine-tuned adapters / GGUFs
       - ./config:/app/config       # live config edits without rebuild
     # GPU passthrough for fine-tuning — remove if no NVIDIA GPU

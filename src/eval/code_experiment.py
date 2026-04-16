@@ -11,6 +11,7 @@ Flow per cycle:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from rich.console import Console
 from rich.table import Table
@@ -28,6 +29,9 @@ from src.training.code_dataset_builder import build_dpo_pairs, save
 from src.training.finetuner import SpecialistFinetuner
 from src.training.model_registry import ModelRegistry
 
+if TYPE_CHECKING:
+    from src.memory.controller import MemoryController
+
 
 class CodeExperimentRunner:
     """Runs the full code self-improvement loop."""
@@ -42,6 +46,7 @@ class CodeExperimentRunner:
         rounds_per_cycle: int = 30,
         output_dir: str | Path = "data/experiments/code",
         console: Console | None = None,
+        memory: MemoryController | None = None,
     ) -> None:
         self.agent_a = agent_a
         self.agent_b = agent_b
@@ -52,6 +57,7 @@ class CodeExperimentRunner:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.console = console or Console()
+        self.memory = memory
         self._best_score = 0.0
 
     async def run(self) -> CodeExperimentReport:
@@ -113,6 +119,14 @@ class CodeExperimentRunner:
             report.cycles[-1].humaneval_pass_at_1 if report.cycles else baseline
         )
         report.improvement = report.final_pass_at_1 - report.baseline_pass_at_1
+
+        if self.memory:
+            await self.memory.end_session()
+            mem_stats = self.memory.stats()
+            self.console.print(
+                f"\n[dim]Memory totals — episodic: {mem_stats['episodic']} · "
+                f"semantic: {mem_stats['semantic']}[/dim]"
+            )
 
         self._save_report(report)
         self._display_report(report)
@@ -182,6 +196,16 @@ class CodeExperimentRunner:
                     agent.specialists[spec_name].model = prev
         else:
             self._best_score = max(self._best_score, pass_at_1)
+
+        # Memory consolidation — sleep phase
+        if self.memory:
+            stats = self.memory.consolidate()
+            self.console.print(
+                f"  [dim]Memory: {stats['promoted']} patterns promoted · "
+                f"{stats['pruned']} episodes pruned · "
+                f"{stats['total_episodic']} episodic · "
+                f"{stats['total_semantic']} semantic[/dim]"
+            )
 
         return metrics
 

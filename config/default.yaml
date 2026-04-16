@@ -38,6 +38,13 @@ finetuning:
   registry_path: "models/registry.json"
   regression_threshold: 0.05
 
+# ── Memory ──
+memory:
+  dir: "data/memory"
+  working_capacity: 10        # max items held in session (7±2 rule)
+  max_episodic: 2000          # prune beyond this during sleep
+  embed_model: "nomic-embed-text"   # via Ollama — pull once: ollama pull nomic-embed-text
+
 # ── Experiment ──
 experiment:
   cycles: 10

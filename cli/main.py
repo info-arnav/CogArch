@@ -13,14 +13,18 @@ if TYPE_CHECKING:
 app = typer.Typer(name="cogarch", help="CogArch — Code Competition Self-Improvement")
 
 
-def _build_specialists(cfg: dict, backend: LLMBackend) -> dict:
+def _build_specialists(cfg: dict, backend: LLMBackend, memory: object = None) -> dict:
     from src.inference.code_specialist import CodeSpecialist
 
     model = cfg["model"]["ollama_id"]
     max_attempts = cfg["specialists"]["max_attempts_per_problem"]
     return {
         name: CodeSpecialist(
-            name=name, backend=backend, model=model, max_attempts=max_attempts
+            name=name,
+            backend=backend,
+            model=model,
+            max_attempts=max_attempts,
+            memory=memory,  # type: ignore[arg-type]
         )
         for name in cfg["specialists"]["enabled"]
     }
@@ -80,6 +84,7 @@ def code_experiment(
     rounds_per_cycle: int = typer.Option(30, "--rounds", "-r"),
     config_path: str = typer.Option("config/default.yaml", "--config", "-c"),
     output_dir: str = typer.Option("data/experiments/code", "--output", "-o"),
+    no_memory: bool = typer.Option(False, "--no-memory", help="Disable memory system"),
 ) -> None:
     """Full self-improvement loop: compete on MBPP → DPO fine-tune → eval HumanEval."""
     load_dotenv()
@@ -96,10 +101,28 @@ def code_experiment(
 
     console = Console()
     cfg = load_config(config_path)
-    backend = OllamaBackend(base_url=cfg["ollama"]["base_url"])
+    ollama_url = cfg["ollama"]["base_url"]
+    backend = OllamaBackend(base_url=ollama_url)
 
-    specialists_a = _build_specialists(cfg, backend)
-    specialists_b = _build_specialists(cfg, backend)
+    # Memory system
+    memory = None
+    if not no_memory:
+        from src.memory.controller import MemoryController
+
+        mem_cfg = cfg.get("memory", {})
+        memory = MemoryController(
+            memory_dir=mem_cfg.get("dir", "data/memory"),
+            ollama_base_url=ollama_url,
+            working_capacity=mem_cfg.get("working_capacity", 10),
+        )
+        console.print(
+            f"[dim]Memory enabled — dir: {mem_cfg.get('dir', 'data/memory')} · "
+            f"episodic: {memory.stats()['episodic']} entries · "
+            f"semantic: {memory.stats()['semantic']} entries[/dim]"
+        )
+
+    specialists_a = _build_specialists(cfg, backend, memory)
+    specialists_b = _build_specialists(cfg, backend, memory)
     agent_a = CodeOrchestrator(specialists=specialists_a)
     agent_b = CodeOrchestrator(specialists=specialists_b)
 
@@ -130,6 +153,7 @@ def code_experiment(
         rounds_per_cycle=rounds_per_cycle,
         output_dir=output_dir,
         console=console,
+        memory=memory,
     )
 
     asyncio.run(runner.run())

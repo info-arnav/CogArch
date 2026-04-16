@@ -1,1 +1,1 @@
-"""Memory systems - experience log, self-state persistence."""
+"""Persistent memory system — working, episodic, and semantic memory."""

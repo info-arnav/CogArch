@@ -56,6 +56,39 @@ graph TD
     Finetune --> Eval[HumanEval\nPass@1]
 ```
 
+### Memory System
+
+Unlike a standard LLM that starts fresh every call, CogArch maintains three persistent memory tiers that mirror how the human brain stores experience:
+
+| Tier | Human equivalent | What's stored | Persists |
+|------|-----------------|---------------|----------|
+| **Working memory** | Active thoughts | Current session context, recent rounds | Session only |
+| **Episodic memory** | "I remember solving X like this" | Every problem attempt + outcome, indexed by embedding | Forever (JSONL) |
+| **Semantic memory** | General knowledge | Patterns promoted from episodes ("IndexError usually means off-by-one") | Forever (SQLite) |
+| **Procedural memory** | Skills / instincts | Fine-tuned model weights | Forever (Ollama) |
+
+**Retrieval** — before attempt 1 on any problem, the specialist embeds the problem description and queries episodic memory for similar past experiences. The top-3 matches are injected into the prompt: *"Similar problems you've solved before..."*
+
+**Consolidation (sleep cycle)** — at the end of each experiment cycle, recurring patterns are extracted from recent episodes and promoted to semantic memory. Low-importance old episodes are pruned. This mirrors REM sleep's role in the hippocampus → cortex memory transfer.
+
+**Embeddings** — `nomic-embed-text` via Ollama (768-dim, ~274MB, CPU-friendly). Falls back to recency-ranked retrieval if unavailable.
+
+```
+New problem arrives
+       ↓
+Embed problem → query episodic + semantic
+       ↓
+Inject top-K memories into specialist prompt
+       ↓
+Specialist solves (up to 10 attempts)
+       ↓
+Record outcome → episodic store + working memory
+       ↓
+[end of cycle] Consolidate: episodes → semantic patterns + prune
+```
+
+Memory lives in `data/memory/` — mounted as a Docker volume so it persists across container restarts, Colab sessions, and fine-tuning cycles. Run with `--no-memory` to disable.
+
 ### Iterative Refinement
 
 Each specialist gets up to 10 attempts on a problem. After each failed attempt, it receives:
@@ -82,6 +115,8 @@ Per specialist, per round:
 
 ### Option 1 — Docker Compose (recommended)
 
+> Pull both models on first run — `deepseek-coder:33b` for inference/fine-tuning and `nomic-embed-text` for memory embeddings.
+
 Works on your local machine, any cloud VM (Lambda Labs, RunPod, Vast.ai), or a server. GPU is used automatically if available.
 
 ```bash
@@ -107,13 +142,14 @@ docker compose run --rm cogarch python -m cli.main code-experiment --cycles 3 --
 
 Paste these cells in order into a Colab notebook with an A100 runtime.
 
-**Cell 1 — Install Ollama + pull model**
+**Cell 1 — Install Ollama + pull models**
 ```bash
 %%bash
 curl -fsSL https://ollama.com/install.sh | sh
 ollama serve > /tmp/ollama.log 2>&1 &
 sleep 8
 ollama pull deepseek-coder:33b
+ollama pull nomic-embed-text
 ```
 
 **Cell 2 — Install Python deps**
@@ -163,6 +199,7 @@ pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git" 
 # Start Ollama separately
 ollama serve &
 ollama pull deepseek-coder:33b
+ollama pull nomic-embed-text
 ```
 
 ---
@@ -174,9 +211,13 @@ ollama pull deepseek-coder:33b
 python -m cli.main code-eval --limit 50
 
 # Full self-improvement loop: compete on MBPP → DPO fine-tune → eval HumanEval
+# Memory is enabled by default — episodic + semantic + working
 python -m cli.main code-experiment --cycles 3 --rounds 30
 
-# Optional flags
+# Disable memory (e.g. for ablation — compare with/without)
+python -m cli.main code-experiment --cycles 3 --rounds 30 --no-memory
+
+# All flags
 python -m cli.main code-experiment \
   --cycles 10 \
   --rounds 50 \
@@ -198,8 +239,16 @@ src/
   models/code.py              — all data models (CodeProblem, AttemptResult, etc.)
   execution/code_runner.py    — sandboxed subprocess execution, per-assertion testing
   inference/
-    code_specialist.py        — iterative solver with error feedback (up to 10 attempts)
+    code_specialist.py        — iterative solver with memory retrieval + error feedback
     code_orchestrator.py      — runs 4 specialists in parallel, coordinator picks best
+  memory/
+    models.py                 — EpisodicEntry, SemanticEntry, WorkingMemoryItem, MemoryContext
+    embedder.py               — nomic-embed-text via Ollama, cosine similarity
+    episodic.py               — JSONL store with similarity retrieval + importance pruning
+    semantic.py               — SQLite fact store, strengthened by repetition
+    working.py                — bounded deque, session-scoped (capacity 10)
+    consolidator.py           — sleep-cycle: episodes → semantic patterns, prune old entries
+    controller.py             — coordinates all three tiers; record / retrieve / consolidate
   training/
     code_competitive.py       — two-agent competition loop
     code_dataset_builder.py   — builds DPO pairs from competition results
@@ -208,11 +257,11 @@ src/
     benchmarks/
       humaneval.py            — eval-only (HumanEval, never trained on)
       mbpp.py                 — training-only (MBPP competition arena)
-    code_experiment.py        — full baseline → compete → finetune → eval loop
+    code_experiment.py        — baseline → compete → finetune → consolidate → eval loop
 cli/main.py                   — code-eval and code-experiment commands
 config/default.yaml           — all tunable parameters
 Dockerfile                    — cogarch Python image
-docker-compose.yml            — ollama + cogarch services
+docker-compose.yml            — ollama + cogarch services, data/memory volume
 ```
 
 ---
@@ -229,13 +278,17 @@ docker-compose.yml            — ollama + cogarch services
 
 **Why subprocess, not Docker, for code execution?** Each solution already runs in a separate Python process with a timeout — isolated, no shared state. Docker-in-Docker adds daemon dependency and latency with no security benefit for this use case.
 
+**Why three memory tiers?** Fine-tuning (procedural) is slow, expensive, and irreversible — you can't fine-tune after every round. Working memory is fast but lost on restart. Episodic + semantic give the model persistent, queryable recall between sessions without touching weights. The three tiers mirror Complementary Learning Systems theory: fast episodic binding (hippocampus) + slow semantic consolidation (cortex) + procedural motor skills (cerebellum/basal ganglia).
+
+**Why `nomic-embed-text` for embeddings?** 274MB, CPU-friendly, already served by the same Ollama instance. No second service, no API key, no latency spike. The embedding quality is sufficient for retrieval at this scale.
+
 ---
 
 ## Requirements
 
 - Python 3.10+
 - Docker + nvidia-container-toolkit (for Docker setup), or
-- Ollama (`ollama serve` + `ollama pull deepseek-coder:33b`) for local/Colab
+- Ollama with `deepseek-coder:33b` + `nomic-embed-text` for local/Colab
 - GPU required for fine-tuning (A100 recommended, T4 works with smaller batch)
 - No API keys — runs 100% locally
 
