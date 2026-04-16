@@ -73,6 +73,25 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 
+[[tool.mypy.overrides]]
+module = [
+    "yaml",
+    "yaml.*",
+    "typer",
+    "torch",
+    "torch.*",
+    "datasets",
+    "datasets.*",
+    "transformers",
+    "transformers.*",
+    "unsloth",
+    "unsloth.*",
+    "trl",
+    "trl.*",
+    "dotenv",
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

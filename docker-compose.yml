@@ -1,0 +1,59 @@
+services:
+
+  # ── Ollama — serves the LLM ──────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama   # model weights persist across restarts
+    # GPU passthrough — remove the `deploy` block if you have no NVIDIA GPU
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # ── Model pull — runs once, exits when done ───────────────────────────────
+  # Re-run manually with: docker compose run --rm model-pull
+  model-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["ollama", "pull", "deepseek-coder:33b"]
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    profiles: [setup]   # only runs when explicitly included: --profile setup
+
+  # ── CogArch — the Python experiment runner ───────────────────────────────
+  cogarch:
+    build: .
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+    volumes:
+      - ./data:/app/data           # experiment outputs
+      - ./models:/app/models       # fine-tuned adapters / GGUFs
+      - ./config:/app/config       # live config edits without rebuild
+    # GPU passthrough for fine-tuning — remove if no NVIDIA GPU
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  ollama_data:

@@ -27,7 +27,7 @@ class SpecialistFinetuner:
 
     def __init__(
         self,
-        base_model: str = "unsloth/llama-3-8b-Instruct-bnb-4bit",
+        base_model: str = "unsloth/deepseek-coder-33b-instruct-bnb-4bit",
         lora_rank: int = 16,
         lora_alpha: int = 16,
         epochs: int = 3,

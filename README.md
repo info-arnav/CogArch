@@ -1,89 +1,168 @@
-# CogArch — Parallel Cognitive Architecture
+# CogArch — Code Competition Architecture
 
 <p align="center">
   <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-MIT-0F766E?style=flat-square" alt="MIT license" /></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square" alt="Python 3.10+" /></a>
   <a href="https://github.com/info-arnav/CogArch/issues"><img src="https://img.shields.io/github/issues/info-arnav/CogArch?style=flat-square" alt="Open issues" /></a>
   <a href="https://github.com/info-arnav/CogArch/stargazers"><img src="https://img.shields.io/github/stars/info-arnav/CogArch?style=flat-square" alt="GitHub stars" /></a>
-  <a href="https://colab.research.google.com/drive/1C1_C1b3sfIGZF4y6eg8-JThzWWZuz5KO?usp=sharing"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open in Colab" /></a>
 </p>
 
-A Python framework for machine consciousness through parallel specialist LLMs, competitive learning, and sleep-cycle self-improvement.
+Can two models make each other smarter — the way two humans sharpen each other through competition?
 
-**Core concept:** A lightweight coordinator model learns to orchestrate multiple specialist models running locally via Ollama (Llama 3 8B), inspired by how the brain's prefrontal cortex coordinates specialized regions.
-
-This project is somewhat vibe-coded and primarily exists to test the concept.
+CogArch tests this by running two independent agent instances against real coding problems. Each agent has four specialists with different coding styles. They compete, and the better solutions become DPO training data for fine-tuning the next generation. Skill is measured before and after on HumanEval — a held-out benchmark neither agent ever trains on.
 
 ---
 
-## What This Is
+## The Idea
 
-CogArch is a research framework where:
-
-- Multiple specialist LLMs run in parallel on every input (logical, creative, skeptical, empathetic)
-- Specialists share outputs and engage in a revision pass (consensus deliberation)
-- A lightweight coordinator model synthesizes their perspectives with attribution weights
-- Continuous improvement through competitive training and sleep-cycle consolidation
-- Self-state tracking - the system maintains awareness of its own uncertainty, focus, and routing patterns
-
-**Novel contributions:**
-
-- Vindication tracking: deprioritized specialists get credit when they were actually right
-- Competitive learning: two agent instances compete on benchmarks and learn from each other's reasoning traces
-- Sleep-cycle consolidation: curates high-signal interactions into per-specialist training datasets
-- Self-improvement experiments: automated baseline → train → re-test loop on real benchmarks (GSM8K, MMLU, TruthfulQA)
-- Runs 100% locally via Ollama — no API keys, no cloud costs
+- **Two agents, no shared state** — Agent A and Agent B solve the same problem independently
+- **Four specialists per agent** — logical (temp 0.3), creative (temp 0.7), skeptical (temp 0.4), empathetic (temp 0.5)
+- **Up to 10 attempts per problem** — each failure feeds back error output for the next try (iterative refinement)
+- **Verifiable reward signal** — code either passes the test assertions or it doesn't; partial credit via `pass_count / total_tests`
+- **Both-fail pairs still train** — even when both agents fail, the one with higher partial credit becomes `chosen`; no round is wasted
+- **HumanEval as held-out eval** — never trained on; measures true generalization (Pass@1, single attempt, no feedback)
+- **MBPP as training arena** — competition rounds draw from MBPP; model never sees HumanEval during training
 
 ---
 
-## Current Status
+## Architecture
 
-Pre-alpha / Active Development
+```mermaid
+graph TD
+    P[MBPP Problem] --> A[Agent A]
+    P --> B[Agent B]
 
-**Implemented:**
+    subgraph Agent A
+        A --> L1[Logical 0.3]
+        A --> C1[Creative 0.7]
+        A --> S1[Skeptical 0.4]
+        A --> E1[Empathetic 0.5]
+        L1 & C1 & S1 & E1 --> Coord1[Coordinator\nbest pass rate wins]
+    end
 
-- Phase 1: Full inference pipeline (specialists, coordinator, orchestrator)
-- Phase 2: Competitive training (two agents compete on benchmarks)
-- Phase 3: Sleep cycle (curator, dataset builder, QLoRA fine-tuning, metrics)
-- Phase 4: Evaluation (scorer, metrics tracker, benchmark loaders)
-- Phase 5: Self-improvement experiment pipeline
-  - Local benchmark loaders (GSM8K, MMLU, TruthfulQA as JSONL)
-  - Train/test splitting with per-cycle unique question partitioning
-  - Automated baseline → compete → sleep → fine-tune → re-test loop
-- **QLoRA fine-tuning** — each sleep cycle produces a new versioned specialist model via unsloth
-- **Model registry** — versioned checkpoints per specialist, automatic rollback on score regression
-- Ollama backend (Llama 3 8B for all specialists and coordinator)
-- YAML-based specialist + coordinator prompt configs
-- Experience logging (JSONL append-only)
-- CLI commands: `infer`, `compete`, `sleep`, `dashboard`, `bench`, `experiment`
+    subgraph Agent B
+        B --> L2[Logical 0.3]
+        B --> C2[Creative 0.7]
+        B --> S2[Skeptical 0.4]
+        B --> E2[Empathetic 0.5]
+        L2 & C2 & S2 & E2 --> Coord2[Coordinator\nbest pass rate wins]
+    end
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for how to help.
+    Coord1 --> Judge[Judge\nrank by pass rate]
+    Coord2 --> Judge
+
+    Judge --> DPO[DPO Pairs\nchosen / rejected]
+    DPO --> Finetune[QLoRA Fine-tune\nunsloth + DeepSeek-Coder 33B]
+    Finetune --> Eval[HumanEval\nPass@1]
+```
+
+### Iterative Refinement
+
+Each specialist gets up to 10 attempts on a problem. After each failed attempt, it receives:
+- How many assertions passed (`2/5 tests`)
+- Which assertions failed (truncated to 120 chars)
+- Any stderr output (last 8 lines of traceback)
+
+The test assertions themselves are never shown — only the error feedback. This mirrors real development.
+
+### DPO Pair Generation
+
+Per specialist, per round:
+| Outcome | `training_signal` | Action |
+|---------|-------------------|--------|
+| A wins  | `win` | A=chosen, B=rejected |
+| A wins (both partial) | `partial_win` | A=chosen, B=rejected |
+| Both partial, A higher | `both_partial` | A=chosen, B=rejected |
+| Both fail equally | `both_fail_ranked` | A=chosen (by order), B=rejected |
+| Identical code | — | Skip |
 
 ---
 
-## Quick Setup
+## Setup
 
-**Run on Google Colab (A100, no local setup):** [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1C1_C1b3sfIGZF4y6eg8-JThzWWZuz5KO?usp=sharing)
+### Option 1 — Docker Compose (recommended)
 
-**Local setup:**
+Works on your local machine, any cloud VM (Lambda Labs, RunPod, Vast.ai), or a server. GPU is used automatically if available.
+
+```bash
+git clone https://github.com/info-arnav/CogArch.git
+cd CogArch
+
+# First run: pull the model (only needed once — weights are cached in a volume)
+docker compose --profile setup up model-pull
+
+# Start Ollama + CogArch
+docker compose up -d
+
+# Baseline eval
+docker compose run --rm cogarch python -m cli.main code-eval --limit 50
+
+# Full experiment loop
+docker compose run --rm cogarch python -m cli.main code-experiment --cycles 3 --rounds 30
+```
+
+**No GPU?** Remove the `deploy` blocks from `docker-compose.yml` — inference still works, fine-tuning will be skipped gracefully.
+
+### Option 2 — Colab (A100)
+
+Paste these cells in order into a Colab notebook with an A100 runtime.
+
+**Cell 1 — Install Ollama + pull model**
+```bash
+%%bash
+curl -fsSL https://ollama.com/install.sh | sh
+ollama serve > /tmp/ollama.log 2>&1 &
+sleep 8
+ollama pull deepseek-coder:33b
+```
+
+**Cell 2 — Install Python deps**
+```bash
+%%bash
+pip install -q \
+  "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git" \
+  trl transformers datasets pydantic rich pyyaml httpx typer python-dotenv
+```
+
+**Cell 3 — Clone + install repo**
+```bash
+%%bash
+git clone https://github.com/info-arnav/CogArch.git
+cd CogArch && pip install -q -e .
+```
+
+**Cell 4 — Baseline HumanEval**
+```python
+import os
+os.chdir("/content/CogArch")
+import subprocess
+subprocess.run(["python", "-m", "cli.main", "code-eval", "--limit", "50"])
+```
+
+**Cell 5 — Full experiment**
+```python
+subprocess.run([
+    "python", "-m", "cli.main", "code-experiment",
+    "--cycles", "3",
+    "--rounds", "30",
+])
+```
+
+### Option 3 — Local (no Docker)
 
 ```bash
 git clone https://github.com/info-arnav/CogArch.git
 cd CogArch
 python -m venv venv && source venv/bin/activate
-make install-dev
+pip install -e ".[dev]"
 
-cp .env.example .env
-# Ensure Ollama is running: ollama serve
-# Pull the model: ollama pull llama3:8b
-```
+# Fine-tuning deps (GPU required)
+pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git" \
+  trl transformers datasets
 
-**With fine-tuning (GPU required):**
-
-```bash
-pip install "unsloth[colab-new]" trl transformers datasets
-# Fine-tuning runs automatically inside the sleep cycle and experiment commands.
-# Specialist models are versioned under models/ and registered with Ollama daily.
+# Start Ollama separately
+ollama serve &
+ollama pull deepseek-coder:33b
 ```
 
 ---
@@ -91,199 +170,79 @@ pip install "unsloth[colab-new]" trl transformers datasets
 ## Usage
 
 ```bash
-# Run inference on a query
-python -m cli.main infer "What causes ocean tides?"
+# Evaluate current model on HumanEval (Pass@1)
+python -m cli.main code-eval --limit 50
 
-# Skip the revision pass (faster, Round 1 only)
-python -m cli.main infer "What is 2+2?" --no-revision
+# Full self-improvement loop: compete on MBPP → DPO fine-tune → eval HumanEval
+python -m cli.main code-experiment --cycles 3 --rounds 30
 
-# Run a competitive session between two agent instances
-python -m cli.main compete data/benchmarks/sample.jsonl --rounds 3
+# Optional flags
+python -m cli.main code-experiment \
+  --cycles 10 \
+  --rounds 50 \
+  --config config/default.yaml \
+  --output data/experiments/code
+```
 
-# Run a sleep cycle (curate interactions, build training datasets)
-python -m cli.main sleep
+Results are written to `data/experiments/code/`. Each cycle produces:
+- `competition_results.jsonl` — all round outcomes with pass rates
+- `training/{specialist}.jsonl` — DPO pairs
+- `eval_scores.json` — HumanEval Pass@1 before and after
 
-# Run benchmark evaluation
-python -m cli.main bench data/benchmarks/sample.jsonl --metric fuzzy_match
+---
 
-# Run a full self-improvement experiment
-python -m cli.main experiment gsm8k --cycles 5
+## File Layout
 
-# View metrics dashboard
-python -m cli.main dashboard
+```
+src/
+  models/code.py              — all data models (CodeProblem, AttemptResult, etc.)
+  execution/code_runner.py    — sandboxed subprocess execution, per-assertion testing
+  inference/
+    code_specialist.py        — iterative solver with error feedback (up to 10 attempts)
+    code_orchestrator.py      — runs 4 specialists in parallel, coordinator picks best
+  training/
+    code_competitive.py       — two-agent competition loop
+    code_dataset_builder.py   — builds DPO pairs from competition results
+    finetuner.py              — QLoRA via unsloth, exports GGUF, registers with Ollama
+  eval/
+    benchmarks/
+      humaneval.py            — eval-only (HumanEval, never trained on)
+      mbpp.py                 — training-only (MBPP competition arena)
+    code_experiment.py        — full baseline → compete → finetune → eval loop
+cli/main.py                   — code-eval and code-experiment commands
+config/default.yaml           — all tunable parameters
+Dockerfile                    — cogarch Python image
+docker-compose.yml            — ollama + cogarch services
 ```
 
 ---
 
-## Architecture Overview
+## Key Design Decisions
 
-### Inference Pipeline
+**Why DeepSeek-Coder 33B?** ~18GB in 4-bit via Ollama, ~22GB for QLoRA fine-tune. Fits in an 80GB A100 with room for the training framework. Strong coding baseline.
 
-```mermaid
-graph TD
-    Input[Input Query] --> Broadcast{Orchestrator}
+**Why same model for both agents?** Temperature variance makes outputs diverge. `logical` at temp 0.3 and `creative` at temp 0.7 produce genuinely different code — same principle as two humans with similar backgrounds making different choices.
 
-    Broadcast -->|Round 1| L[Logical Specialist<br/>Analytical reasoning]
-    Broadcast -->|Round 1| C[Creative Specialist<br/>Novel approaches]
-    Broadcast -->|Round 1| S[Skeptical Specialist<br/>Critical analysis]
-    Broadcast -->|Round 1| E[Empathetic Specialist<br/>Human-centered view]
+**Why up to 10 attempts?** Real coding rarely works first try. Iterative refinement with error feedback is how actual development works. The model learns to read tracebacks and fix them.
 
-    L --> Share[Share All Outputs]
-    C --> Share
-    S --> Share
-    E --> Share
+**Why HumanEval as held-out eval?** It's the benchmark used when announcing new models (Claude, GPT-4, Gemini). Using the same standard makes scores directly comparable to published results — and since we never train on it, improvement is genuine.
 
-    Share -->|Round 2| L2[Logical<br/>Revise answer]
-    Share -->|Round 2| C2[Creative<br/>Revise answer]
-    Share -->|Round 2| S2[Skeptical<br/>Revise answer]
-    Share -->|Round 2| E2[Empathetic<br/>Revise answer]
-
-    L2 --> Coord[Coordinator<br/>Small Model]
-    C2 --> Coord
-    S2 --> Coord
-    E2 --> Coord
-
-    Coord --> Output[Final Answer<br/>+ Attribution<br/>+ Self-State]
-
-    style Input fill:#e1f5ff
-    style Output fill:#d4edda
-    style Coord fill:#fff3cd
-    style Share fill:#f8f9fa
-```
-
-### Competitive Learning
-
-```mermaid
-sequenceDiagram
-    participant B as Benchmark
-    participant A as Agent A
-    participant C as Agent B
-    participant J as Judge
-
-    B->>A: Same question
-    B->>C: Same question
-
-    Note over A: Full inference<br/>(4 specialists + coordinator)
-    Note over C: Full inference<br/>(4 specialists + coordinator)
-
-    A->>J: Answer A + reasoning traces
-    C->>J: Answer B + reasoning traces
-
-    J->>J: Score both against ground truth
-
-    J->>A: Your score + opponent's reasoning
-    J->>C: Your score + opponent's reasoning
-
-    Note over A,C: Both log interaction with cross-agent insights
-
-    rect rgb(240, 248, 255)
-        Note over A,C: After N rounds: Sleep Cycle<br/>Winners teach, losers learn
-    end
-```
-
-### Wake/Sleep Cycle
-
-```mermaid
-stateDiagram-v2
-    [*] --> Awake: System Start
-
-    Awake --> Inference: User Query
-    Inference --> Logging: Record interaction
-    Logging --> Inference: Continue
-
-    Logging --> Asleep: Trigger<br/>(N interactions)
-
-    state Asleep {
-        [*] --> Curate
-        Curate --> Assemble: High-signal<br/>interactions
-        Assemble --> Metrics: Per-specialist<br/>datasets
-        Metrics --> Validate: Compute stats
-        Validate --> [*]
-    }
-
-    Asleep --> Awake: Updated specialists
-
-    note right of Awake
-        Four specialists process in parallel
-        Coordinator synthesizes results
-        Experience logged to JSONL
-    end note
-
-    note right of Asleep
-        Curator selects valuable interactions
-        Datasets built for specialist training
-        Vindication tracking adjusts weights
-    end note
-```
-
-**Core Components:**
-
-- **Specialists**: Same base model (Llama 3 8B via Ollama), different personalities (YAML configs)
-- **Coordinator**: Same model used for routing and synthesis, doesn't solve directly
-- **Experience Log**: JSONL append-only record of all interactions for training
-- **Sleep Cycle**: Curate → Assemble → Compute Metrics loop
-- **Experiment Runner**: Automated self-improvement loop with real benchmarks
-- **Competitive Training**: Two agents compete, cross-learn from reasoning traces
-
----
-
-## Design Principles
-
-1. Specialists are configs, not code - adding a new specialist means creating a new YAML file
-2. Inference and training fully separated - run inference with zero training dependencies
-3. Prompts are first-class citizens - versioned, testable, swappable
-4. Every data artifact has a clear home - structured data/ directory with schemas
+**Why subprocess, not Docker, for code execution?** Each solution already runs in a separate Python process with a timeout — isolated, no shared state. Docker-in-Docker adds daemon dependency and latency with no security benefit for this use case.
 
 ---
 
 ## Requirements
 
 - Python 3.10+
-- Ollama installed and running (`ollama serve`)
-- Llama 3 8B model pulled (`ollama pull llama3:8b`)
-- No API keys required — runs 100% locally
-- No GPU required for inference (but recommended)
-- GPU required for fine-tuning (`finetuning.enabled: true` in config) — A100/T4 on Colab works well
-
----
-
-## Documentation
-
-- [Architecture Specification](docs/PARALLEL_COGNITIVE_ARCHITECTURE_SPEC.md) - Complete build document
-- [Contributing Guide](CONTRIBUTING.md) - How to contribute
-- [Code of Conduct](CODE_OF_CONDUCT.md) - Community standards
-- [Changelog](CHANGELOG.md) - Version history
-
----
-
-## Contributing
-
-We welcome contributions. High-impact areas:
-
-- Core pipeline implementation (Phase 1: inference loop)
-- Benchmark integrations (ARC-AGI, FrontierMath, custom tasks)
-- Evaluation metrics (routing accuracy, vindication tracking)
-- Competitive training loop
-- Documentation and examples
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and development workflow.
+- Docker + nvidia-container-toolkit (for Docker setup), or
+- Ollama (`ollama serve` + `ollama pull deepseek-coder:33b`) for local/Colab
+- GPU required for fine-tuning (A100 recommended, T4 works with smaller batch)
+- No API keys — runs 100% locally
 
 ---
 
 ## License
 
-MIT License - see [LICENSE.md](LICENSE.md) for details.
-
----
-
-## Acknowledgments
-
-Inspired by:
-
-- Global Workspace Theory (Bernard Baars)
-- Attention Schema Theory (Michael Graziano)
-- The Wake-Sleep algorithm (Hinton et al.)
-- Model-agnostic meta-learning research
-- The open source AI community
+MIT — see [LICENSE.md](LICENSE.md)
 
 Built by [Arnav Gupta](https://github.com/info-arnav) • [Report an issue](https://github.com/info-arnav/CogArch/issues)

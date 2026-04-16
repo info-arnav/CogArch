@@ -1,5 +1,6 @@
 """Configuration loader — reads YAML configs into typed Python objects."""
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -15,8 +16,16 @@ def load_yaml(path: Path) -> dict[str, Any]:
 
 
 def load_config(config_path: Path | str = "config/default.yaml") -> dict:
-    """Load the main CogArch configuration."""
-    return load_yaml(Path(config_path))
+    """Load the main CogArch configuration.
+
+    OLLAMA_BASE_URL env var overrides ollama.base_url — set automatically
+    in Docker Compose so the cogarch container talks to the ollama service.
+    """
+    cfg = load_yaml(Path(config_path))
+    ollama_url = os.environ.get("OLLAMA_BASE_URL")
+    if ollama_url:
+        cfg.setdefault("ollama", {})["base_url"] = ollama_url
+    return cfg
 
 
 def load_specialist_config(
