@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import subprocess
 import tempfile
-from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -127,7 +126,9 @@ class SpecialistFinetuner:
             examples, system_prompt, tokenizer, Dataset
         )  # noqa: N803
 
-        version_tag = date.today().isoformat()
+        from datetime import datetime
+
+        version_tag = datetime.now().strftime("%Y%m%d-%H%M%S")
         adapter_dir = self.output_dir / specialist_name / version_tag / "adapter"
         adapter_dir.mkdir(parents=True, exist_ok=True)
 
@@ -202,10 +203,13 @@ class SpecialistFinetuner:
         specialist_name: str,
         dpo_dataset_path: str | Path,
         system_prompt: str,
+        prev_adapter_path: str | Path | None = None,
     ) -> str | None:
         """DPO fine-tune using preference pairs. Returns Ollama model name or None."""
         try:
-            return self._run_dpo_inner(specialist_name, dpo_dataset_path, system_prompt)
+            return self._run_dpo_inner(
+                specialist_name, dpo_dataset_path, system_prompt, prev_adapter_path
+            )
         except Exception as exc:
             self.console.print(
                 f"  [yellow]DPO failed for {specialist_name} "
@@ -218,6 +222,7 @@ class SpecialistFinetuner:
         specialist_name: str,
         dpo_dataset_path: str | Path,
         system_prompt: str,
+        prev_adapter_path: str | Path | None = None,
     ) -> str | None:
         try:
             import torch
@@ -245,8 +250,13 @@ class SpecialistFinetuner:
             f"({len(examples)} pairs, {self.epochs} epochs)...[/cyan]"
         )
 
+        load_from = str(prev_adapter_path) if prev_adapter_path else self.base_model
+        if prev_adapter_path:
+            self.console.print(
+                f"  [dim]Loading from previous adapter: {Path(prev_adapter_path).parent.parent.name}[/dim]"
+            )
         model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=self.base_model,
+            model_name=load_from,
             max_seq_length=self.max_seq_length,
             load_in_4bit=True,
         )
@@ -271,7 +281,9 @@ class SpecialistFinetuner:
 
         dataset = self._build_dpo_dataset(examples, system_prompt, tokenizer, Dataset)
 
-        version_tag = date.today().isoformat()
+        from datetime import datetime
+
+        version_tag = datetime.now().strftime("%Y%m%d-%H%M%S")
         adapter_dir = self.output_dir / specialist_name / version_tag / "adapter"
         adapter_dir.mkdir(parents=True, exist_ok=True)
 
@@ -328,7 +340,14 @@ class SpecialistFinetuner:
         if model_name is None:
             return None
         self.console.print(f"  [green]Ollama DPO model created: {model_name}[/green]")
+        # Store adapter path for next cycle to load as starting point
+        self._last_adapter: dict[str, str] = getattr(self, "_last_adapter", {})
+        self._last_adapter[specialist_name] = str(adapter_dir)
         return model_name
+
+    def get_last_adapter(self, specialist_name: str) -> str | None:
+        """Return the adapter path from the most recent DPO run for this specialist."""
+        return getattr(self, "_last_adapter", {}).get(specialist_name)
 
     def _build_dataset(
         self,

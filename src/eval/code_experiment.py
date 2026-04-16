@@ -163,13 +163,16 @@ class CodeExperimentRunner:
 
         dpo_paths = save(datasets, self.output_dir / "training")
 
-        # Fine-tune each specialist
+        # Fine-tune each specialist — pass previous adapter so cycles compound
         for spec_name in self.agent_a.specialists:
             system_prompt = self.agent_a.specialists[spec_name].system_prompt
             dpo_path = dpo_paths.get(spec_name)
             new_model = None
             if self.finetuner and dpo_path and dpo_path.exists():
-                new_model = self.finetuner.run_dpo(spec_name, dpo_path, system_prompt)
+                prev_adapter = self.finetuner.get_last_adapter(spec_name)
+                new_model = self.finetuner.run_dpo(
+                    spec_name, dpo_path, system_prompt, prev_adapter_path=prev_adapter
+                )
             if new_model and self.registry:
                 self.registry.register(spec_name, new_model)
                 # Update both agents to use the new model
