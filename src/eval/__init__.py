@@ -1,1 +1,1 @@
-"""Evaluation - benchmarks, metrics, scoring."""
+"""Training data (MBPP) and evaluation (EvalPlus)."""

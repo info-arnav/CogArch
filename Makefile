@@ -1,41 +1,24 @@
-.PHONY: help install install-dev install-all test lint format clean run-api infer compete sleep
+.PHONY: help install-dev test lint format clean serve smoke pilot
 
 help:
-	@echo "CogArch Development Commands"
+	@echo "Local:"
+	@echo "  make install-dev   Install the package with dev tools"
+	@echo "  make test          Run the unit tests"
+	@echo "  make lint          ruff + mypy"
+	@echo "  make format        black"
 	@echo ""
-	@echo "Setup:"
-	@echo "  make install       Install core dependencies"
-	@echo "  make install-dev   Install with dev dependencies"
-	@echo "  make install-all   Install everything (training + dev)"
-	@echo ""
-	@echo "Development:"
-	@echo "  make test          Run all tests"
-	@echo "  make lint          Run linters (ruff + mypy)"
-	@echo "  make format        Format code with black"
-	@echo "  make clean         Remove build artifacts"
-	@echo ""
-	@echo "Usage:"
-	@echo "  make infer         Run inference (pass QUERY='...')"
-	@echo "  make compete       Run competitive training"
-	@echo "  make sleep         Run sleep cycle"
-
-install:
-	pip install -e .
+	@echo "GPU server:"
+	@echo "  scripts/setup_server.sh   One-time environment setup"
+	@echo "  make serve         Start vLLM with runtime LoRA loading"
+	@echo "  make smoke         Check vLLM, sandbox, DPO training, LoRA loading, throughput"
+	@echo "  make pilot         Launch the pilot runs in the background"
 
 install-dev:
 	pip install -e ".[dev]"
-	pip install -r requirements-dev.txt
 	pre-commit install
 
-install-all:
-	pip install -e ".[all]"
-	pip install -r requirements-dev.txt
-
 test:
-	pytest tests/ -v
-
-test-cov:
-	pytest tests/ --cov=src --cov-report=html --cov-report=term
+	pytest tests/ -q
 
 lint:
 	ruff check src/ cli/ tests/
@@ -45,20 +28,15 @@ format:
 	black src/ cli/ tests/
 
 clean:
-	rm -rf build/ dist/ *.egg-info
+	rm -rf build/ dist/ *.egg-info .pytest_cache .mypy_cache .ruff_cache htmlcov/
 	find . -type d -name __pycache__ -exec rm -rf {} +
-	find . -type f -name "*.pyc" -delete
-	rm -rf .pytest_cache .mypy_cache .ruff_cache htmlcov/
 
-infer:
-	@if [ -z "$(QUERY)" ]; then \
-		echo "Usage: make infer QUERY='Your question here'"; \
-	else \
-		python -m cli.main infer "$(QUERY)"; \
-	fi
+serve:
+	scripts/serve_vllm.sh
 
-compete:
-	python -m cli.main compete --rounds 50 --benchmark arc-agi
+smoke:
+	.venv/bin/python -m cli.main smoke config/smoke.yaml
+	.venv/bin/python -m cli.main run config/smoke.yaml
 
-sleep:
-	python -m cli.main sleep
+pilot:
+	scripts/launch_pilot.sh

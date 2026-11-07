@@ -111,6 +111,14 @@ class SemanticStore:
             ).fetchall()
         return [self._row(r) for r in rows]
 
+    def recent(self, category: str, limit: int = 5) -> list[SemanticEntry]:
+        """Most recently added or reinforced entries in a category."""
+        rows = self._conn.execute(
+            "SELECT * FROM semantic WHERE category=? ORDER BY updated_at DESC LIMIT ?",
+            (category, limit),
+        ).fetchall()
+        return [self._row(r) for r in rows]
+
     def get_all(self) -> list[SemanticEntry]:
         rows = self._conn.execute(
             "SELECT * FROM semantic ORDER BY confidence DESC"

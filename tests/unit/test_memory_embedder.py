@@ -1,6 +1,6 @@
-"""Tests for the embedder utility functions (no Ollama required)."""
+"""Tests for the embedder utility functions."""
 
-from src.memory.embedder import cosine_similarity, is_zero_vector
+from src.memory.embedder import cosine_similarity
 
 
 class TestCosineSimilarity:
@@ -33,14 +33,3 @@ class TestCosineSimilarity:
         a = [0.3, 0.7, 0.1]
         b = [0.6, 0.2, 0.9]
         assert abs(cosine_similarity(a, b) - cosine_similarity(b, a)) < 1e-9
-
-
-class TestIsZeroVector:
-    def test_zero_vector(self):
-        assert is_zero_vector([0.0, 0.0, 0.0])
-
-    def test_nonzero_vector(self):
-        assert not is_zero_vector([0.0, 0.0, 1.0])
-
-    def test_empty_vector(self):
-        assert is_zero_vector([])

@@ -1,1 +1,1 @@
-"""Persistent memory system — working, episodic, and semantic memory."""
+"""Per-agent memory: working, episodic and semantic stores."""

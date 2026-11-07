@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.memory.embedder import cosine_similarity, is_zero_vector
+from src.memory.embedder import cosine_similarity
 from src.memory.models import EpisodicEntry
 
 
@@ -57,18 +57,11 @@ class EpisodicStore:
         k: int = 3,
         min_similarity: float = 0.4,
     ) -> list[EpisodicEntry]:
-        """Return top-K most similar entries.
-
-        Falls back to recency order if the query is a zero vector
-        (i.e. embedding unavailable).
-        """
-        if is_zero_vector(query_embedding):
-            return sorted(self._cache, key=lambda e: e.timestamp, reverse=True)[:k]
-
+        """Return the top-K entries most similar to the query embedding."""
         scored = [
             (cosine_similarity(query_embedding, e.embedding), e)
             for e in self._cache
-            if e.embedding and not is_zero_vector(e.embedding)
+            if e.embedding
         ]
         scored.sort(key=lambda x: x[0], reverse=True)
         results = [e for sim, e in scored if sim >= min_similarity][:k]

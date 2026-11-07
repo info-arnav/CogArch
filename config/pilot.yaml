@@ -1,0 +1,63 @@
+# Pilot: two agents teaching each other.
+# Compare against config/pilot_solo.yaml (one agent alone) and the baseline
+# (untrained model) recorded at the start of every run.
+
+model:
+  base: "Qwen/Qwen2.5-Coder-1.5B-Instruct"
+  served_name: "Qwen/Qwen2.5-Coder-1.5B-Instruct"
+  max_tokens: 768
+
+inference:
+  base_url: "http://localhost:8000/v1"
+  max_concurrent_requests: 64
+
+agents:
+  names: [a, b]
+  seeds: {a: 11, b: 22}
+  specialists: [logical, creative, skeptical, empathetic]
+  share_discoveries: true
+
+environment:
+  max_attempts: 3
+  feedback: binary          # agents are only told "wrong"
+  execution_timeout_seconds: 10
+  memory_limit_mb: 1024
+  probes_per_problem: 6
+
+data:
+  validation_size: 50
+  split_seed: 0
+
+training:
+  enabled: true
+  lora_rank: 16
+  lora_alpha: 32
+  learning_rate: 5.0e-6
+  beta: 0.1
+  epochs: 2
+  batch_size: 4
+  grad_accumulation: 2
+  max_length: 3072
+  min_pairs: 8
+  parallel_jobs: 5
+  rollback_threshold: 0.05
+
+memory:
+  enabled: true
+  embedding_model: "BAAI/bge-small-en-v1.5"
+  working_capacity: 10
+  max_episodic: 2000
+  retrieve_k: 3
+  min_similarity: 0.5
+  lessons_per_sleep: 5
+  lessons_in_prompt: 5
+
+evaluation:
+  benchmarks: [humaneval, mbpp]
+
+experiment:
+  name: pilot-pair
+  cycles: 3
+  rounds_per_cycle: 60
+  round_batch_size: 4
+  output_dir: data/runs

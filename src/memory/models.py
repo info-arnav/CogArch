@@ -22,28 +22,28 @@ class EpisodicEntry(BaseModel):
 
     id: str = Field(default_factory=_uuid)
     timestamp: str = Field(default_factory=_now)
-    content: str  # natural-language description of the experience
+    content: str  # what the agent experienced, in its own terms
     embedding: list[float] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     importance: float = 0.5  # 0–1; affects retention during pruning
-    recall_count: int = 0  # how many times retrieved
+    recall_count: int = 0
     last_recalled: str | None = None
 
 
 class SemanticEntry(BaseModel):
-    """A fact or pattern extracted from multiple episodes."""
+    """A general lesson distilled from many episodes during sleep."""
 
     id: str = Field(default_factory=_uuid)
-    concept: str  # the fact / pattern in plain language
-    category: str  # e.g. "error_pattern", "success_pattern", "algorithm"
+    concept: str
+    category: str
     evidence_count: int = 1
-    confidence: float = 0.5  # strengthens each time the pattern is observed
+    confidence: float = 0.5  # strengthens each time the lesson is re-derived
     created_at: str = Field(default_factory=_now)
     updated_at: str = Field(default_factory=_now)
 
 
 class WorkingMemoryItem(BaseModel):
-    """An item currently held in the active session context."""
+    """An item held in the current session's context."""
 
     content: str
     importance: float = 0.5
@@ -52,31 +52,23 @@ class WorkingMemoryItem(BaseModel):
 
 
 class MemoryContext(BaseModel):
-    """Assembled context injected into a specialist prompt."""
+    """What an agent recalls before working on a problem."""
 
     episodic: list[EpisodicEntry] = Field(default_factory=list)
     semantic: list[SemanticEntry] = Field(default_factory=list)
     working: list[WorkingMemoryItem] = Field(default_factory=list)
 
     def to_prompt_text(self) -> str:
-        """Format all memory tiers as a compact prompt section."""
         parts: list[str] = []
-
-        if self.working:
-            parts.append("## Recent session context")
-            for item in self.working[-5:]:
-                parts.append(f"- {item.content}")
-
         if self.semantic:
-            parts.append("## Relevant knowledge")
-            for sem_entry in self.semantic[:5]:
-                parts.append(f"- {sem_entry.concept}")
-
+            parts.append("## Lessons you have learned")
+            parts.extend(f"- {s.concept}" for s in self.semantic)
         if self.episodic:
-            parts.append("## Similar past experiences")
-            for ep_entry in self.episodic[:3]:
-                parts.append(f"- {ep_entry.content}")
-
+            parts.append("## Similar problems you have seen")
+            parts.extend(e.content for e in self.episodic)
+        if self.working:
+            parts.append("## Recent events")
+            parts.extend(f"- {w.content}" for w in self.working)
         return "\n".join(parts)
 
     def is_empty(self) -> bool:

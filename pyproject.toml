@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "cogarch"
 version = "0.1.0"
-description = "Parallel Cognitive Architecture for Machine Consciousness"
+description = "A brain-inspired community of LLM agents that teach each other from 'wrong' signals"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "Arnav Gupta", email = "arnav@arnav.org"}
 ]
-keywords = ["ai", "llm", "cognitive-architecture", "machine-consciousness", "multi-agent"]
+keywords = ["ai", "llm", "cognitive-architecture", "multi-agent", "self-improvement", "dpo"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
@@ -33,6 +33,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Everything needed to run experiments on the GPU server (torch is installed
+# separately for the right accelerator — see scripts/setup_server.sh).
+research = [
+    "transformers>=4.56.2",
+    "peft>=0.21.0",
+    "trl>=1.17.0",
+    "datasets>=4.7.0",
+    "accelerate>=1.11.0",
+    "sentence-transformers>=5.0.0",
+    "evalplus>=0.3.1",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
@@ -84,11 +95,13 @@ module = [
     "datasets.*",
     "transformers",
     "transformers.*",
-    "unsloth",
-    "unsloth.*",
+    "peft",
+    "peft.*",
     "trl",
     "trl.*",
-    "dotenv",
+    "evalplus",
+    "evalplus.*",
+    "sentence_transformers",
 ]
 ignore_missing_imports = true
 

@@ -68,7 +68,7 @@ class TestMemoryContext:
         assert not ctx.is_empty()
         text = ctx.to_prompt_text()
         assert "solved two-sum" in text
-        assert "Recent session context" in text
+        assert "Recent events" in text
 
     def test_with_semantic(self):
         ctx = MemoryContext(
@@ -78,7 +78,7 @@ class TestMemoryContext:
         )
         text = ctx.to_prompt_text()
         assert "use hash map" in text
-        assert "Relevant knowledge" in text
+        assert "Lessons you have learned" in text
 
     def test_with_episodic(self):
         ctx = MemoryContext(
@@ -86,7 +86,7 @@ class TestMemoryContext:
         )
         text = ctx.to_prompt_text()
         assert "two-sum" in text
-        assert "Similar past experiences" in text
+        assert "Similar problems you have seen" in text
 
     def test_all_tiers_combined(self):
         ctx = MemoryContext(

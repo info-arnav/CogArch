@@ -1,103 +1,82 @@
-"""MBPP benchmark loader — TRAINING ONLY, never used for evaluation.
+"""MBPP training pool for the community.
 
-Downloads google-research-datasets/mbpp from HuggingFace on first run,
-caches to data/benchmarks/mbpp.jsonl.
-
-Only the sanitized split is used (cleaner problem statements).
-Test assertions come from test_list — typically 3 per problem.
+Uses the full MBPP dataset (all splits) minus every task that appears in
+MBPP+, which is reserved for evaluation. Agents see the task description and
+the function signature; the tests stay with the environment.
 """
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
+import random
+import re
+from typing import Any
 
 from src.models.code import CodeProblem
 
-_CACHE = Path("data/benchmarks/mbpp.jsonl")
+_ASSERT_CALL = re.compile(r"assert\s+(?:not\s+)?\(?\s*(?:set\()?\s*(\w+)\s*\(")
 
 
-def load(split: str = "train", limit: int | None = None) -> list[CodeProblem]:
-    """Load MBPP problems. Downloads from HuggingFace if not cached."""
-    if not _CACHE.exists():
-        _download()
-
-    problems: list[CodeProblem] = []
-    with open(_CACHE) as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            raw = json.loads(line)
-            if raw.get("split", "train") != split:
-                continue
-            assertions = [a.strip() for a in raw.get("test_list", []) if a.strip()]
-            if not assertions:
-                continue
-            prompt_text = (raw.get("text") or raw.get("prompt") or "").strip()
-            if not prompt_text:
-                continue
-            problems.append(
-                CodeProblem(
-                    task_id=f"mbpp/{raw['task_id']}",
-                    prompt=prompt_text,
-                    entry_point=_infer_entry_point(raw.get("code", ""), assertions),
-                    test_assertions=assertions,
-                    source="mbpp",
-                    difficulty=_infer_difficulty(assertions),
-                )
-            )
-            if limit and len(problems) >= limit:
-                break
-
-    return problems
+def entry_point(code: str, tests: list[str]) -> str:
+    """The function the tests call."""
+    for test in tests:
+        match = _ASSERT_CALL.search(test)
+        if match and re.search(rf"^def {match.group(1)}\(", code, re.MULTILINE):
+            return match.group(1)
+    match = re.search(r"^def (\w+)\(", code, re.MULTILINE)
+    if match is None:
+        raise ValueError("No function definition in reference code")
+    return match.group(1)
 
 
-def _infer_entry_point(code: str, assertions: list[str]) -> str:
-    """Extract function name from the canonical solution or first assertion."""
-    import re
-
-    # Try to get it from the solution code
-    m = re.search(r"^def (\w+)\(", code, re.MULTILINE)
-    if m:
-        return m.group(1)
-
-    # Fall back: parse from first assertion like `assert func_name(...)`
-    if assertions:
-        m = re.search(r"assert\s+(\w+)\s*\(", assertions[0])
-        if m:
-            return m.group(1)
-
-    return "solution"
+def signature(code: str, name: str) -> str:
+    match = re.search(
+        rf"^def {name}\(.*?\)\s*(?:->.*?)?:", code, re.MULTILINE | re.DOTALL
+    )
+    if match is None:
+        raise ValueError(f"No signature for {name}")
+    return match.group(0)
 
 
-def _infer_difficulty(assertions: list[str]) -> str:
-    """Rough difficulty heuristic based on assertion complexity."""
-    total_len = sum(len(a) for a in assertions)
-    if total_len < 150:
-        return "easy"
-    if total_len < 350:
-        return "medium"
-    return "hard"
+def to_problem(row: dict[str, Any]) -> CodeProblem:
+    tests = [t.strip() for t in row["test_list"] if t.strip()]
+    name = entry_point(row["code"], tests)
+    prompt = (
+        f"{row['text'].strip()}\n\n"
+        f"Use this signature:\n```python\n{signature(row['code'], name)}\n```"
+    )
+    return CodeProblem(
+        task_id=f"mbpp/{row['task_id']}",
+        prompt=prompt,
+        entry_point=name,
+        tests=tests,
+        setup_code=row.get("test_setup_code") or "",
+    )
 
 
-def _download() -> None:
-    """Download MBPP sanitized split from HuggingFace."""
-    try:
-        from datasets import load_dataset  # type: ignore[import]
-    except ImportError as e:
-        raise RuntimeError("pip install datasets  — required to download MBPP") from e
+def split(
+    problems: list[CodeProblem], validation_size: int, seed: int
+) -> tuple[list[CodeProblem], list[CodeProblem]]:
+    """Deterministic (train, validation) split."""
+    shuffled = sorted(problems, key=lambda p: p.task_id)
+    random.Random(seed).shuffle(shuffled)
+    return shuffled[validation_size:], shuffled[:validation_size]
 
-    _CACHE.parent.mkdir(parents=True, exist_ok=True)
-    ds = load_dataset("google-research-datasets/mbpp", "sanitized")
 
-    with open(_CACHE, "w") as f:
-        for split_name in ("train", "validation", "test"):
-            if split_name not in ds:
-                continue
-            for item in ds[split_name]:
-                row = dict(item)
-                row["split"] = (
-                    "train" if split_name in ("train", "validation") else "test"
-                )
-                f.write(json.dumps(row) + "\n")
+def mbpp_plus_task_numbers() -> set[int]:
+    from evalplus.data import get_mbpp_plus
+
+    return {int(task_id.split("/")[1]) for task_id in get_mbpp_plus()}
+
+
+def load_pool() -> list[CodeProblem]:
+    """All MBPP tasks not in MBPP+."""
+    from datasets import load_dataset
+
+    excluded = mbpp_plus_task_numbers()
+    rows = [
+        row
+        for part in load_dataset("google-research-datasets/mbpp", "full").values()
+        for row in part
+        if row["task_id"] not in excluded
+    ]
+    return [to_problem(row) for row in rows]

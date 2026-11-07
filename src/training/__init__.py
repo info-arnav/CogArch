@@ -1,1 +1,1 @@
-"""Training components - competitive learning, curator, dataset builder, sleep cycle."""
+"""Community rounds, preference pairs, DPO fine-tuning and adapter registry."""

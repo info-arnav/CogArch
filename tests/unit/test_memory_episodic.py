@@ -52,12 +52,12 @@ class TestEpisodicStore:
         assert len(results) == 1
         assert results[0].content == "apple"
 
-    def test_retrieve_zero_vector_falls_back_to_recency(self, tmp_path):
+    def test_retrieve_skips_entries_without_embeddings(self, tmp_path):
         store = EpisodicStore(tmp_path / "ep.jsonl")
-        store.add(_entry("older"))
-        store.add(_entry("newer"))
-        results = store.retrieve([0.0, 0.0, 0.0], k=1)
-        assert results[0].content == "newer"
+        store.add(_entry("no embedding"))
+        store.add(_entry("target", embedding=[1.0, 0.0]))
+        results = store.retrieve([1.0, 0.0], k=5, min_similarity=0.5)
+        assert [r.content for r in results] == ["target"]
 
     def test_retrieve_increments_recall_count(self, tmp_path):
         store = EpisodicStore(tmp_path / "ep.jsonl")

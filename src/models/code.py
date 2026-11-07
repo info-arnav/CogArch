@@ -1,137 +1,152 @@
-"""Data models for the code competition pipeline."""
+"""Data models for problems, agent decisions, rounds and training data."""
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 class CodeProblem(BaseModel):
-    """A single coding problem with hidden test cases."""
+    """A coding task. Tests are held by the environment and never shown to agents."""
 
     task_id: str
-    prompt: str = Field(..., description="Problem description shown to agents")
-    entry_point: str = Field(..., description="Function name the agent must implement")
-    test_assertions: list[str] = Field(
-        ..., description="Individual assert statements — hidden from agents"
-    )
-    source: str = Field(default="mbpp", description="'mbpp' or 'humaneval'")
-    difficulty: str = Field(default="medium", description="easy / medium / hard")
+    prompt: str = Field(description="Task text shown to agents")
+    entry_point: str
+    tests: list[str] = Field(description="Assert statements run by the environment")
+    setup_code: str = ""
 
 
-class AttemptResult(BaseModel):
-    """Result of executing a single code attempt against test cases."""
+class ExecutionResult(BaseModel):
+    """The environment's verdict on one submission.
+
+    `tests_passed` / `tests_total` are kept for analysis only; the agent is
+    only ever shown `feedback`.
+    """
+
+    passed: bool
+    tests_passed: int
+    tests_total: int
+    error_types: list[str] = Field(default_factory=list)
+    timed_out: bool = False
+    feedback: str = ""
+
+
+class Proposal(BaseModel):
+    """A specialist's candidate solution. Never judged by the environment directly."""
+
+    specialist: str
+    code: str
+
+
+class Message(BaseModel):
+    role: str
+    content: str
+
+
+class Decision(BaseModel):
+    """One attempt: the specialists propose, the coordinator decides, the world judges."""
 
     attempt_number: int
+    proposals: list[Proposal]
+    coordinator_prompt: list[Message] = Field(
+        description="The coordinator's prompt without memory (the DPO training prompt)"
+    )
+    coordinator_output: str
     code: str
-    pass_count: int = 0
-    total_tests: int = 0
-    failed_assertions: list[str] = Field(default_factory=list)
-    error: str = ""
-    timed_out: bool = False
-
-    @property
-    def pass_rate(self) -> float:
-        return self.pass_count / self.total_tests if self.total_tests > 0 else 0.0
-
-    @property
-    def passed_all(self) -> bool:
-        return self.pass_count == self.total_tests and self.total_tests > 0
-
-
-class SpecialistSolution(BaseModel):
-    """All attempts by one specialist on one problem."""
-
-    specialist_name: str
-    attempts: list[AttemptResult] = Field(default_factory=list)
-
-    @property
-    def best_attempt(self) -> AttemptResult | None:
-        if not self.attempts:
-            return None
-        return max(self.attempts, key=lambda a: (a.pass_rate, -a.attempt_number))
-
-    @property
-    def best_pass_rate(self) -> float:
-        best = self.best_attempt
-        return best.pass_rate if best else 0.0
+    based_on: list[str] = Field(default_factory=list)
+    result: ExecutionResult
 
 
 class AgentResult(BaseModel):
-    """All specialist solutions for one agent on one problem."""
+    """One agent's attempts on one problem."""
 
+    agent: str
     problem_id: str
-    solutions: dict[str, SpecialistSolution] = Field(default_factory=dict)
-    chosen_specialist: str = ""
+    decisions: list[Decision]
 
     @property
-    def best_solution(self) -> SpecialistSolution | None:
-        if not self.solutions:
-            return None
-        return max(self.solutions.values(), key=lambda s: s.best_pass_rate)
+    def solved(self) -> bool:
+        return any(d.result.passed for d in self.decisions)
 
     @property
-    def pass_rate(self) -> float:
-        best = self.best_solution
-        return best.best_pass_rate if best else 0.0
+    def solution(self) -> str | None:
+        """The code the world accepted, if any."""
+        return next((d.code for d in self.decisions if d.result.passed), None)
 
 
-class CodeCompetitiveResult(BaseModel):
-    """Outcome of one competitive round between two agents."""
+class Discovery(BaseModel):
+    """A solution the world accepted, and who found it."""
 
-    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    code: str
+    found_by: str
+
+
+class RoundResult(BaseModel):
+    """All agents' results on one problem, plus what each agent came to know."""
+
+    timestamp: str = Field(default_factory=_now)
+    cycle: int
     problem: CodeProblem
-    agent_a: AgentResult
-    agent_b: AgentResult
-    winner: str = Field(..., description="'a', 'b', or 'tie'")
+    results: dict[str, AgentResult]
+    known_solution: dict[str, Discovery] = Field(
+        default_factory=dict,
+        description="agent -> accepted solution it knows (own or shared by a peer)",
+    )
+    probes: dict[str, list[str]] = Field(
+        default_factory=dict, description="agent -> example calls it wrote itself"
+    )
+    agreement: dict[str, dict[str, bool]] = Field(
+        default_factory=dict,
+        description="agent -> proposal key -> behaves like the known solution",
+    )
 
-    @property
-    def winning_agent(self) -> AgentResult:
-        return self.agent_a if self.winner == "a" else self.agent_b
 
-    @property
-    def losing_agent(self) -> AgentResult:
-        return self.agent_b if self.winner == "a" else self.agent_a
-
-
-class CodeTrainingExample(BaseModel):
-    """A DPO preference pair derived from a competitive round."""
+class PreferencePair(BaseModel):
+    """A DPO pair for one role (a specialist or the coordinator) of one agent."""
 
     problem_id: str
-    specialist_name: str
-    prompt: str = Field(..., description="Problem description (plain text)")
-    chosen_code: str = Field(..., description="Higher pass-rate code")
-    rejected_code: str = Field(..., description="Lower pass-rate code")
-    chosen_pass_rate: float = 0.0
-    rejected_pass_rate: float = 0.0
-    training_signal: str = Field(
-        default="dpo", description="'win', 'partial_win', 'both_fail_ranked'"
-    )
-    source_round_id: str = ""
+    agent: str
+    role: str
+    prompt: list[Message]
+    chosen: str
+    rejected: str
+    source: str = Field(description="who found the chosen solution: 'self' or a peer")
+
+
+class EvalScore(BaseModel):
+    """EvalPlus Pass@1 for one agent: benchmark -> {'base': x, 'plus': y}."""
+
+    agent: str
+    scores: dict[str, dict[str, float]] = Field(default_factory=dict)
 
 
 class CycleMetrics(BaseModel):
-    """Per-cycle tracking for the code experiment."""
-
     cycle: int
-    humaneval_pass_at_1: float = 0.0
-    mbpp_train_avg_pass_rate: float = 0.0
-    specialist_win_rates: dict[str, float] = Field(default_factory=dict)
-    dpo_pairs_generated: int = 0
-    rounds_competed: int = 0
-    both_failed_rounds: int = 0
+    rounds: int = 0
+    solved_rate: dict[str, float] = Field(default_factory=dict)
+    learned_from_peer: dict[str, int] = Field(
+        default_factory=dict,
+        description="agent -> problems it failed but received a solution for from a peer",
+    )
+    preference_pairs: dict[str, dict[str, int]] = Field(default_factory=dict)
+    pair_sources: dict[str, dict[str, int]] = Field(default_factory=dict)
+    coordinator_choices: dict[str, dict[str, int]] = Field(default_factory=dict)
+    validation_pass_at_1: dict[str, float] = Field(default_factory=dict)
+    rolled_back: list[str] = Field(default_factory=list)
+    lessons: dict[str, list[str]] = Field(default_factory=dict)
+    code_divergence: float | None = None
+    outcome_disagreement: float | None = None
 
 
-class CodeExperimentReport(BaseModel):
-    """Full report from a code self-improvement experiment."""
-
-    model: str
-    train_benchmark: str
-    eval_benchmark: str
-    baseline_pass_at_1: float = 0.0
-    final_pass_at_1: float = 0.0
-    improvement: float = 0.0
+class ExperimentReport(BaseModel):
+    started_at: str = Field(default_factory=_now)
+    config: dict
+    baseline_validation: dict[str, float] = Field(default_factory=dict)
+    baseline_eval: list[EvalScore] = Field(default_factory=list)
     cycles: list[CycleMetrics] = Field(default_factory=list)
-    total_dpo_pairs: int = 0
-    total_rounds: int = 0
+    final_eval: list[EvalScore] = Field(default_factory=list)

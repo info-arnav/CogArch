@@ -1,1 +1,1 @@
-"""Inference components - specialists, coordinator, orchestrator, consensus."""
+"""Agents: specialists, coordinator, prompts and the inference client."""
