@@ -74,6 +74,14 @@ class TestMBPP:
         code = "def helper(x):\n    return x\ndef main(x):\n    return helper(x)"
         assert entry_point(code, ["assert main(1) == 1"]) == "main"
 
+    def test_space_before_parenthesis(self):
+        code = "import math \r\ndef max_Prime_Factors (n): \r\n    return n"
+        assert (
+            entry_point(code, ["assert max_Prime_Factors(15) == 5"])
+            == "max_Prime_Factors"
+        )
+        assert signature(code, "max_Prime_Factors") == "def max_Prime_Factors (n):"
+
     def test_signature_multiline(self):
         code = "def f(a,\n      b):\n    return a"
         assert signature(code, "f") == "def f(a,\n      b):"

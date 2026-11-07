@@ -20,9 +20,9 @@ def entry_point(code: str, tests: list[str]) -> str:
     """The function the tests call."""
     for test in tests:
         match = _ASSERT_CALL.search(test)
-        if match and re.search(rf"^def {match.group(1)}\(", code, re.MULTILINE):
+        if match and re.search(rf"^def\s+{match.group(1)}\s*\(", code, re.MULTILINE):
             return match.group(1)
-    match = re.search(r"^def (\w+)\(", code, re.MULTILINE)
+    match = re.search(r"^def\s+(\w+)\s*\(", code, re.MULTILINE)
     if match is None:
         raise ValueError("No function definition in reference code")
     return match.group(1)
@@ -30,7 +30,7 @@ def entry_point(code: str, tests: list[str]) -> str:
 
 def signature(code: str, name: str) -> str:
     match = re.search(
-        rf"^def {name}\(.*?\)\s*(?:->.*?)?:", code, re.MULTILINE | re.DOTALL
+        rf"^def\s+{name}\s*\(.*?\)\s*(?:->.*?)?:", code, re.MULTILINE | re.DOTALL
     )
     if match is None:
         raise ValueError(f"No signature for {name}")
