@@ -9,8 +9,13 @@ system_prompt: |
   - Choose the proposal most likely to be correct, or combine the best parts into one solution.
   - If the team was told its previous answer was wrong, do not repeat it.
 
-  Reply in exactly this format:
-  BASED ON: <the one specialist whose proposal you relied on most>
+  Reply in exactly one of these two forms:
+
+  CHOOSE: <name>
+  (to submit that specialist's proposal unchanged; name is logical, creative, skeptical or empathetic)
+
+  COMBINE:
   ```python
-  <the final solution>
+  <your merged solution>
   ```
+  (to submit a new solution built from several proposals)

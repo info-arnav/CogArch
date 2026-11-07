@@ -9,8 +9,8 @@ WRONG = "def add(a, b):\n    return a - b"
 def team(system: str, user: str, model: str) -> str:
     if is_coordinator(system):
         if "Your team's previous answer" in user:
-            return f"BASED ON: logical\n{code_reply(RIGHT)}"
-        return f"BASED ON: creative\n{code_reply(WRONG)}"
+            return "CHOOSE: logical"
+        return "CHOOSE: creative"
     if "Logical" in system:
         return code_reply(RIGHT)
     return code_reply(WRONG)
@@ -23,7 +23,7 @@ async def test_retries_until_accepted(add_problem):
     assert [d.result.passed for d in result.decisions] == [False, True]
     assert result.solved and result.solution == RIGHT
     first = result.decisions[0]
-    assert first.based_on == ["creative"]
+    assert first.choice == "creative" and first.code == WRONG
     assert first.result.feedback == "Your solution is wrong."
     assert {p.specialist for p in first.proposals} == {
         "logical",
@@ -37,7 +37,7 @@ async def test_only_coordinator_decision_is_judged(add_problem):
     # Logical proposes the right code, but the coordinator always picks wrong code.
     def stubborn(system: str, user: str, model: str) -> str:
         if is_coordinator(system):
-            return f"BASED ON: creative\n{code_reply(WRONG)}"
+            return "CHOOSE: creative"
         return team(system, user, model)
 
     result = await make_agent(ScriptedChat(stubborn), max_attempts=2).solve(add_problem)

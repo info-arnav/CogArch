@@ -44,5 +44,18 @@ def smoke(config: str = typer.Argument("config/smoke.yaml")) -> None:
     asyncio.run(smoke_test.run(load_config(config), Console()))
 
 
+@app.command()
+def dashboard(
+    runs: str = typer.Option("data/runs", help="Directory containing run folders"),
+    port: int = typer.Option(8080),
+) -> None:
+    """Serve the live dashboard on 127.0.0.1 (use an SSH tunnel to view it)."""
+    from pathlib import Path
+
+    from src.dashboard import serve
+
+    serve(Path(runs), port=port)
+
+
 if __name__ == "__main__":
     app()

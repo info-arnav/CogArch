@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CogArch Live</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0: #f4f4f2; --surface-1: #fcfcfb; --border: #e3e2de;
+    --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #8a8984;
+    --grid: #ecebe7; --pair: #2a78d6; --solo: #eb6834;
+    --good: #008300; --warn: #b86e00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-0: #121211; --surface-1: #1a1a19; --border: #2d2d2b;
+      --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+      --grid: #2a2a28; --pair: #3987e5; --solo: #d95926;
+      --good: #3fae3f; --warn: #e0a030;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--surface-0); color: var(--text-primary);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1180px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; margin: 0 0 2px; }
+  h2 { font-size: 15px; margin: 0 0 12px; }
+  .sub { color: var(--text-secondary); margin: 0 0 20px; }
+  .panel { background: var(--surface-1); border: 1px solid var(--border);
+           border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+  .legend { display: flex; gap: 16px; color: var(--text-secondary); font-size: 13px; margin-bottom: 8px; }
+  .swatch { display: inline-block; width: 12px; height: 3px; border-radius: 2px;
+            vertical-align: middle; margin-right: 6px; }
+  svg text { fill: var(--text-muted); font-size: 11px; }
+  .tooltip { position: fixed; pointer-events: none; background: var(--surface-1);
+             border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+             font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.15); display: none; }
+  .bar { height: 6px; background: var(--grid); border-radius: 3px; overflow: hidden; margin: 4px 0 10px; }
+  .bar > div { height: 100%; background: var(--text-secondary); border-radius: 3px; }
+  .tag { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 10px;
+         border: 1px solid var(--border); color: var(--text-secondary); }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--grid); }
+  th { color: var(--text-secondary); font-weight: 600; }
+  td.num { font-variant-numeric: tabular-nums; }
+  details { margin-top: 8px; color: var(--text-secondary); }
+  summary { cursor: pointer; }
+  pre { white-space: pre-wrap; font-size: 11px; color: var(--text-secondary);
+        background: var(--surface-0); padding: 8px; border-radius: 6px; max-height: 180px; overflow: auto; }
+  ul { margin: 4px 0; padding-left: 18px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 13px; }
+  .kv span:nth-child(odd) { color: var(--text-secondary); }
+</style>
+</head>
+<body>
+<main>
+  <h1>CogArch Live</h1>
+  <p class="sub">Two agents teaching each other vs one agent alone · refreshes every 15s · <span id="updated">loading…</span></p>
+
+  <section class="panel">
+    <h2>Validation Pass@1 by cycle (cycle 0 = untrained)</h2>
+    <div class="legend">
+      <span><span class="swatch" style="background:var(--pair)"></span>Pair (each line = one agent)</span>
+      <span><span class="swatch" style="background:var(--solo)"></span>Solo</span>
+    </div>
+    <svg id="chart" width="100%" height="260" role="img" aria-label="Validation pass rate by cycle"></svg>
+    <details><summary>Table view</summary><div id="chart-table"></div></details>
+  </section>
+
+  <section class="panel">
+    <h2>EvalPlus Pass@1 (start → end)</h2>
+    <div id="evalplus"></div>
+  </section>
+
+  <div class="grid" id="runs"></div>
+</main>
+<div class="tooltip" id="tip"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const pct = (x) => x == null ? "–" : (100 * x).toFixed(0) + "%";
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function series(runs) {
+  const out = [];
+  for (const run of runs) for (const agent of run.agents) {
+    const points = [{ cycle: 0, value: run.baseline_validation[agent] }];
+    for (const c of run.cycles) points.push({ cycle: c.cycle, value: c.validation_pass_at_1[agent] });
+    out.push({ label: `${run.name} · agent ${agent}`, condition: run.condition,
+               points: points.filter(p => p.value != null), total: run.cycles_total });
+  }
+  return out;
+}
+
+function drawChart(runs) {
+  const svg = $("chart"), data = series(runs);
+  const W = svg.clientWidth || 800, H = 260, m = { l: 40, r: 16, t: 10, b: 28 };
+  const maxCycle = Math.max(1, ...runs.map(r => r.cycles_total));
+  const values = data.flatMap(s => s.points.map(p => p.value));
+  const lo = Math.max(0, Math.floor((Math.min(...values, 1) - 0.05) * 10) / 10);
+  const hi = Math.min(1, Math.ceil((Math.max(...values, 0) + 0.05) * 10) / 10);
+  const x = c => m.l + (W - m.l - m.r) * c / maxCycle;
+  const y = v => m.t + (H - m.t - m.b) * (1 - (v - lo) / Math.max(hi - lo, 0.1));
+  let g = "";
+  for (let v = lo; v <= hi + 1e-9; v += 0.1) {
+    g += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)"/>`;
+    g += `<text x="${m.l - 6}" y="${y(v) + 4}" text-anchor="end">${pct(v)}</text>`;
+  }
+  for (let c = 0; c <= maxCycle; c++) g += `<text x="${x(c)}" y="${H - 8}" text-anchor="middle">${c}</text>`;
+  for (const s of data) {
+    const color = `var(--${s.condition})`;
+    const d = s.points.map((p, i) => `${i ? "L" : "M"}${x(p.cycle)},${y(p.value)}`).join("");
+    g += `<path d="${d}" fill="none" stroke="${color}" stroke-width="2"/>`;
+    for (const p of s.points) {
+      g += `<circle cx="${x(p.cycle)}" cy="${y(p.value)}" r="4" fill="${color}" stroke="var(--surface-1)" stroke-width="2"/>`;
+      g += `<circle cx="${x(p.cycle)}" cy="${y(p.value)}" r="12" fill="transparent" data-tip="${esc(s.label)}<br>cycle ${p.cycle}: <b>${pct(p.value)}</b>"/>`;
+    }
+  }
+  svg.innerHTML = g;
+  const rows = data.map(s => `<tr><td>${esc(s.label)}</td>${s.points.map(p => `<td class="num">c${p.cycle}: ${pct(p.value)}</td>`).join("")}</tr>`).join("");
+  $("chart-table").innerHTML = `<table>${rows}</table>`;
+}
+
+function drawEvalplus(runs) {
+  const rows = [];
+  for (const run of runs) for (const agent of run.agents) {
+    const base = run.baseline_eval.find(e => e.agent === agent)?.scores || {};
+    const fin = run.final_eval.find(e => e.agent === agent)?.scores || {};
+    for (const bench of Object.keys(base)) for (const kind of ["base", "plus"]) {
+      const name = bench === "humaneval" ? (kind === "base" ? "HumanEval" : "HumanEval+")
+                                         : (kind === "base" ? "MBPP" : "MBPP+");
+      const a = base[bench]?.[kind], b = fin[bench]?.[kind];
+      const delta = b == null ? "" : ((b - a) * 100 >= 0 ? "+" : "") + ((b - a) * 100).toFixed(1) + " pp";
+      rows.push(`<tr><td>${esc(run.name)}</td><td>${agent}</td><td>${name}</td><td class="num">${pct(a)}</td><td class="num">${pct(b)}</td><td class="num">${delta}</td></tr>`);
+    }
+  }
+  $("evalplus").innerHTML = rows.length
+    ? `<table><tr><th>Run</th><th>Agent</th><th>Benchmark</th><th>Start</th><th>End</th><th>Change</th></tr>${rows.join("")}</table>`
+    : `<p class="sub">Appears after each run's baseline evaluation.</p>`;
+}
+
+function runCard(run) {
+  const last = run.cycles[run.cycles.length - 1];
+  const progress = run.stage === "finished" ? 1
+    : (run.cycles_done + (run.rounds_done || 0) / run.rounds_total) / run.cycles_total;
+  const kv = (k, v) => `<span>${k}</span><span>${v}</span>`;
+  let body = `<div class="kv">`;
+  body += kv("Stage", `${esc(run.stage)}${run.rounds_done != null ? ` · ${run.rounds_done}/${run.rounds_total} problems` : ""}`);
+  if (last) {
+    body += kv("Solved (last cycle)", run.agents.map(a => `${a}: ${pct(last.solved_rate[a])}`).join(" · "));
+    if (run.condition === "pair") {
+      body += kv("Learned from partner", run.agents.map(a => `${a}: ${last.learned_from_peer[a] ?? 0}`).join(" · "));
+      body += kv("Answers differ", `${pct(last.code_divergence)} code · ${pct(last.outcome_disagreement)} outcome`);
+    }
+    body += kv("Training pairs", run.agents.map(a =>
+      `${a}: ${Object.values(last.preference_pairs[a] || {}).reduce((x, y) => x + y, 0)}`).join(" · "));
+    body += kv("Coordinator relies on", run.agents.map(a => {
+      const ch = last.coordinator_choices[a] || {};
+      const top = Object.entries(ch).sort((p, q) => q[1] - p[1])[0];
+      return `${a}: ${top ? esc(top[0]) : "–"}`;
+    }).join(" · "));
+    if (last.rolled_back.length) body += kv("Rolled back", last.rolled_back.join(", "));
+  }
+  body += `</div>`;
+  if (last && Object.keys(last.lessons).length) {
+    body += `<details><summary>Sleep lessons (cycle ${last.cycle})</summary>` +
+      Object.entries(last.lessons).map(([a, ls]) =>
+        `<b>Agent ${a}</b><ul>${ls.map(l => `<li>${esc(l)}</li>`).join("")}</ul>`).join("") + `</details>`;
+  }
+  body += `<details><summary>Log</summary><pre>${esc(run.log.join("\n"))}</pre></details>`;
+  return `<section class="panel"><h2>${esc(run.name)} <span class="tag">${run.condition}</span></h2>
+    <div class="bar"><div style="width:${(100 * progress).toFixed(0)}%"></div></div>${body}</section>`;
+}
+
+async function refresh() {
+  try {
+    const runs = await (await fetch("/api/runs")).json();
+    drawChart(runs); drawEvalplus(runs);
+    $("runs").innerHTML = runs.map(runCard).join("") || `<p class="sub">No runs yet.</p>`;
+    $("updated").textContent = "updated " + new Date().toLocaleTimeString();
+  } catch (e) {
+    $("updated").textContent = "server unreachable — retrying";
+  }
+}
+
+document.addEventListener("mousemove", (ev) => {
+  const t = ev.target.closest?.("[data-tip]"), tip = $("tip");
+  if (!t) { tip.style.display = "none"; return; }
+  tip.innerHTML = t.dataset.tip; tip.style.display = "block";
+  tip.style.left = (ev.clientX + 12) + "px"; tip.style.top = (ev.clientY + 12) + "px";
+});
+refresh(); setInterval(refresh, 15000);
+</script>
+</body>
+</html>

@@ -58,7 +58,10 @@ class Decision(BaseModel):
     )
     coordinator_output: str
     code: str
-    based_on: list[str] = Field(default_factory=list)
+    choice: str | None = Field(
+        default=None,
+        description="Specialist whose proposal was submitted, 'combined', or None",
+    )
     result: ExecutionResult
 
 

@@ -64,8 +64,7 @@ def make_team(solver: bool):
         if system.startswith("You review"):
             return "- Check signs"
         if is_coordinator(system):
-            pick = ("logical", RIGHT) if solver else ("creative", WRONG)
-            return f"BASED ON: {pick[0]}\n{code_reply(pick[1])}"
+            return "CHOOSE: logical" if solver else "CHOOSE: creative"
         if "Logical" in system:
             return code_reply(RIGHT if solver else WRONG)
         if "Skeptical" in system:
@@ -97,11 +96,11 @@ async def test_round_shares_and_credits(add_problem):
     assert all(p.source == "a" for p in pairs_b["logical"])
     # Coordinator: picking skeptical's proposal is preferred over what it chose.
     coord = pairs_b[COORDINATOR]
-    assert len(coord) == 2 and coord[0].chosen.startswith("BASED ON: skeptical")
+    assert len(coord) == 2 and coord[0].chosen == "CHOOSE: skeptical"
 
     pairs_a = build_pairs([r], "a", personas)
     assert all(p.source == "self" for ps in pairs_a.values() for p in ps)
-    assert pairs_a[COORDINATOR][0].chosen.startswith("BASED ON: logical")
+    assert pairs_a[COORDINATOR][0].chosen == "CHOOSE: logical"
 
 
 async def test_solo_agent_learns_nothing_from_unsolved(add_problem):

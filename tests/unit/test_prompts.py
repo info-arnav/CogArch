@@ -67,16 +67,34 @@ class TestParsing:
     def test_extract_code_without_block(self):
         assert extract_code("x = 1") == "x = 1"
 
-    def test_parse_coordinator(self):
-        code, named = parse_coordinator(
-            "BASED ON: Creative, logical\n```python\ndef add(a, b):\n    return a + b\n```",
-            NAMES,
+    def test_choose_submits_proposal_unchanged(self):
+        proposals = [Proposal(specialist=n, code=f"# {n}") for n in NAMES]
+        assert parse_coordinator("CHOOSE: Skeptical", proposals) == (
+            "# skeptical",
+            "skeptical",
         )
-        assert code.startswith("def add") and named == ["logical", "creative"]
+        assert parse_coordinator("**CHOOSE:** creative", proposals) == (
+            "# creative",
+            "creative",
+        )
+
+    def test_combine_submits_own_code(self):
+        proposals = [Proposal(specialist=n, code=f"# {n}") for n in NAMES]
+        reply = "COMBINE:\n```python\nx = 1\n```"
+        assert parse_coordinator(reply, proposals) == ("x = 1", "combined")
+
+    def test_unformatted_reply_uses_its_code(self):
+        proposals = [Proposal(specialist=n, code=f"# {n}") for n in NAMES]
+        assert parse_coordinator("```python\ny = 2\n```", proposals) == ("y = 2", None)
+        assert parse_coordinator("CHOOSE: nobody", proposals) == (
+            "CHOOSE: nobody",
+            None,
+        )
 
     def test_coordinator_selection_roundtrip(self):
-        reply = coordinator_selection(Proposal(specialist="skeptical", code="x = 1"))
-        assert parse_coordinator(reply, NAMES) == ("x = 1", ["skeptical"])
+        proposal = Proposal(specialist="skeptical", code="x = 1")
+        reply = coordinator_selection(proposal)
+        assert parse_coordinator(reply, [proposal]) == ("x = 1", "skeptical")
 
     def test_parse_probes_keeps_only_calls(self):
         text = "```python\nadd(1, 2)\nadd(0, 0)\nprint('x')\nadd(1, 2)\n```"

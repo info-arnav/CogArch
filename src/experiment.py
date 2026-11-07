@@ -339,7 +339,7 @@ class Experiment:
                 if name in r.known_solution and r.known_solution[name].found_by != name
             )
             metrics.coordinator_choices[name] = dict(
-                Counter(s for r in results for s in r.decisions[0].based_on)
+                Counter(str(r.decisions[0].choice) for r in results)
             )
 
     def _save(self, report: ExperimentReport) -> None:

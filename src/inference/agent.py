@@ -94,7 +94,7 @@ class Agent:
         memory_text: str,
         previous: Decision | None,
         purpose: str,
-    ) -> tuple[list[Proposal], list[Message], str, str, list[str]]:
+    ) -> tuple[list[Proposal], list[Message], str, str, str | None]:
         roles = list(self.specialists.values())
         responses = await asyncio.gather(
             *(
@@ -121,11 +121,11 @@ class Agent:
             problem.task_id,
             attempt_number,
         )
-        code, based_on = parse_coordinator(output, list(self.specialists))
+        code, choice = parse_coordinator(output, proposals)
         training_prompt = coordinator_messages(
             self.coordinator.persona, problem, proposals, "", previous
         )
-        return proposals, training_prompt, output, code, based_on
+        return proposals, training_prompt, output, code, choice
 
     async def solve(self, problem: CodeProblem) -> AgentResult:
         """Work on a problem until the world accepts an answer or attempts run out."""
@@ -136,7 +136,7 @@ class Agent:
         decisions: list[Decision] = []
         previous: Decision | None = None
         for attempt_number in range(1, self.max_attempts + 1):
-            proposals, prompt, output, code, based_on = await self._attempt(
+            proposals, prompt, output, code, choice = await self._attempt(
                 problem, attempt_number, memory_text, previous, "solve"
             )
             decision = Decision(
@@ -145,7 +145,7 @@ class Agent:
                 coordinator_prompt=prompt,
                 coordinator_output=output,
                 code=code,
-                based_on=based_on,
+                choice=choice,
                 result=await self.sandbox.run_tests(code, problem),
             )
             decisions.append(decision)

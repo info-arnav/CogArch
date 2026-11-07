@@ -95,21 +95,29 @@ def coordinator_messages(
 
 
 def coordinator_selection(proposal: Proposal) -> str:
-    """A well-formed coordinator reply that adopts one proposal unchanged."""
-    return f"BASED ON: {proposal.specialist}\n{_code_block(proposal.code)}"
+    """A well-formed coordinator reply that submits one proposal unchanged."""
+    return f"CHOOSE: {proposal.specialist}"
 
 
-_BASED_ON = re.compile(r"^\s*BASED ON:\s*(.+)$", re.MULTILINE | re.IGNORECASE)
+COMBINED = "combined"
+_CHOOSE = re.compile(r"^\W*CHOOSE\W*:?\W*(\w+)", re.MULTILINE | re.IGNORECASE)
+_COMBINE = re.compile(r"^\W*COMBINE\b", re.MULTILINE | re.IGNORECASE)
 
 
-def parse_coordinator(output: str, specialists: list[str]) -> tuple[str, list[str]]:
-    """Return (final code, specialists named in the BASED ON line)."""
-    match = _BASED_ON.search(output)
-    named: list[str] = []
-    if match:
-        mentioned = {part.strip().lower() for part in match.group(1).split(",")}
-        named = [s for s in specialists if s in mentioned]
-    return extract_code(output), named
+def parse_coordinator(output: str, proposals: list[Proposal]) -> tuple[str, str | None]:
+    """Return (submitted code, choice).
+
+    choice is a specialist's name (its proposal is submitted unchanged),
+    "combined" (the reply's own code block is submitted), or None when the
+    reply follows neither form (its code block, if any, is submitted).
+    """
+    by_name = {p.specialist: p for p in proposals}
+    chosen = _CHOOSE.search(output)
+    if chosen and chosen.group(1).lower() in by_name:
+        return by_name[chosen.group(1).lower()].code, chosen.group(1).lower()
+    if _COMBINE.search(output):
+        return extract_code(output), COMBINED
+    return extract_code(output), None
 
 
 # ── self-made probes (the agent's own example calls) ────────────────────────
