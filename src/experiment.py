@@ -256,6 +256,11 @@ class Experiment:
             )
             self.agents[name].roles[role].model = served
             updated.append((name, role))
+            # Rollback only ever returns to the previous version, so anything
+            # older can leave the server.
+            history = self.registry.history(name, role)
+            if len(history) >= 3:
+                await self.client.unload_adapter(history[-3].served_name)
         return updated
 
     async def _rollback(

@@ -39,7 +39,7 @@ training:
   grad_accumulation: 2
   max_length: 3072
   min_pairs: 8
-  parallel_jobs: 5
+  parallel_jobs: 1         # 6 runs share the GPU with vLLM
   rollback_threshold: 0.1   # validation noise is ~±0.07 on 50 problems
 
 memory:
@@ -57,7 +57,7 @@ evaluation:
 
 experiment:
   name: pilot-pair
-  cycles: 3
-  rounds_per_cycle: 60
+  cycles: 5
+  rounds_per_cycle: 100
   round_batch_size: 4
   output_dir: data/runs

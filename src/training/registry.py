@@ -48,6 +48,9 @@ class AdapterRegistry:
         versions = self._history.get(self._key(agent, role), [])
         return versions[-1] if versions else None
 
+    def history(self, agent: str, role: str) -> list[AdapterVersion]:
+        return list(self._history.get(self._key(agent, role), []))
+
     def push(self, agent: str, role: str, version: AdapterVersion) -> None:
         self._history.setdefault(self._key(agent, role), []).append(version)
         self._save()
