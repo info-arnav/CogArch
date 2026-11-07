@@ -127,8 +127,10 @@ def probe_messages(problem: CodeProblem, count: int) -> list[Message]:
 
 
 def parse_probes(text: str, entry_point: str, limit: int) -> list[str]:
-    probes = []
-    for line in extract_code(text).splitlines():
+    """Example calls from anywhere in the reply (models often restate the
+    function in one code block and put the calls in another)."""
+    probes: list[str] = []
+    for line in text.splitlines():
         line = line.strip().rstrip(",")
         if line.startswith(f"{entry_point}(") and line not in probes:
             probes.append(line)
@@ -142,9 +144,13 @@ def reflection_messages(experiences: str, count: int) -> list[Message]:
     return _messages(
         "You review a coding team's recent experiences and distil lasting lessons.",
         f"Recent experiences:\n\n{experiences}\n\n"
-        f"Write up to {count} short, general lessons that would help the team avoid "
-        "being wrong on future problems. One lesson per line, each starting with '- '. "
-        "Lessons must be general advice, not answers to specific problems.",
+        "Compare the problems the team got wrong with the solutions that were "
+        "eventually accepted. What kinds of mistakes did the team make, and what "
+        "would have avoided them?\n\n"
+        f"Write up to {count} specific lessons drawn from these experiences, one per "
+        "line, each starting with '- '. Avoid generic advice (such as 'write tests' or "
+        "'use clear names'); name the concrete pitfall. Do not include solutions to "
+        "specific problems.",
     )
 
 

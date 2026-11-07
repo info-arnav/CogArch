@@ -82,6 +82,13 @@ class TestParsing:
         text = "```python\nadd(1, 2)\nadd(0, 0)\nprint('x')\nadd(1, 2)\n```"
         assert parse_probes(text, "add", 5) == ["add(1, 2)", "add(0, 0)"]
 
+    def test_parse_probes_from_second_code_block(self):
+        text = (
+            "```python\ndef add(a, b):\n    return a + b\n```\nCalls:\n"
+            "```python\nadd(3, 4)\nadd(0, 0)\n```"
+        )
+        assert parse_probes(text, "add", 5) == ["add(3, 4)", "add(0, 0)"]
+
     def test_parse_lessons(self):
         text = (
             "Here:\n- Check empty input\n* Avoid recursion depth\n- Check empty input"

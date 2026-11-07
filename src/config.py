@@ -72,7 +72,7 @@ class TrainingConfig(BaseModel):
     max_length: int = 3072
     min_pairs: int = 8
     parallel_jobs: int = 4
-    rollback_threshold: float = 0.05
+    rollback_threshold: float = 0.1
 
 
 class MemoryConfig(BaseModel):

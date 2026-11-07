@@ -304,8 +304,10 @@ class Experiment:
             )
 
             scores, divergence, disagreement = await self._validate(validation)
+            changed = {name for name, _ in updated}
             for name, score in scores.items():
-                if score < best[name] - self.cfg.training.rollback_threshold:
+                regressed = score < best[name] - self.cfg.training.rollback_threshold
+                if name in changed and regressed:
                     self.console.print(
                         f"  [yellow]Agent {name} regressed — rolling back[/yellow]"
                     )

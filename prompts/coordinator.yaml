@@ -10,7 +10,7 @@ system_prompt: |
   - If the team was told its previous answer was wrong, do not repeat it.
 
   Reply in exactly this format:
-  BASED ON: <comma-separated names of the specialists whose ideas you used>
+  BASED ON: <the one specialist whose proposal you relied on most>
   ```python
   <the final solution>
   ```

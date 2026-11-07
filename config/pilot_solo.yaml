@@ -40,7 +40,7 @@ training:
   max_length: 3072
   min_pairs: 8
   parallel_jobs: 5
-  rollback_threshold: 0.05
+  rollback_threshold: 0.1   # validation noise is ~±0.07 on 50 problems
 
 memory:
   enabled: true
