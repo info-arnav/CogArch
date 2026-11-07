@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -58,6 +59,9 @@ class Experiment:
         }
         self.coordinator_persona = load_coordinator()
         self.agents: dict[str, Agent] = {}
+        # Adapter names must be unique on the shared vLLM server, including
+        # across reruns of the same experiment name.
+        self.session = format(int(time.time()), "x")
 
     # ── setup ────────────────────────────────────────────────────────────────
 
@@ -243,7 +247,7 @@ class Experiment:
         updated = []
         for key, job in jobs.items():
             name, role = key.split("/")
-            served = f"{self.cfg.experiment.name}-{name}-{role}-c{cycle}"
+            served = f"{self.cfg.experiment.name}-{self.session}-{name}-{role}-c{cycle}"
             await self.client.load_adapter(served, Path(job.output_dir))
             self.registry.push(
                 name,

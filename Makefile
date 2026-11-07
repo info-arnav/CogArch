@@ -1,4 +1,4 @@
-.PHONY: help install-dev test lint format clean serve smoke pilot
+.PHONY: help install-dev test lint format clean serve smoke pilot dashboard
 
 help:
 	@echo "Local:"
@@ -12,6 +12,8 @@ help:
 	@echo "  make serve         Start vLLM with runtime LoRA loading"
 	@echo "  make smoke         Check vLLM, sandbox, DPO training, LoRA loading, throughput"
 	@echo "  make pilot         Launch the pilot runs in the background"
+	@echo "  make dashboard     Live dashboard on the server's localhost:8080"
+	@echo "                    (view: ssh -L 8080:localhost:8080 root@<server>)"
 
 install-dev:
 	pip install -e ".[dev]"
@@ -34,9 +36,14 @@ clean:
 serve:
 	scripts/serve_vllm.sh
 
+EXP = docker exec -w $(CURDIR) cogarch-exp
+
 smoke:
-	.venv/bin/python -m cli.main smoke config/smoke.yaml
-	.venv/bin/python -m cli.main run config/smoke.yaml
+	$(EXP) python -m cli.main smoke config/smoke.yaml
+	$(EXP) python -m cli.main run config/smoke.yaml
 
 pilot:
 	scripts/launch_pilot.sh
+
+dashboard:
+	docker exec -d -w $(CURDIR) cogarch-exp sh -c "python -m cli.main dashboard > /tmp/dashboard.log 2>&1"

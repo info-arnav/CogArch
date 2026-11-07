@@ -67,13 +67,15 @@ class InferenceClient:
             "/load_lora_adapter",
             json={"lora_name": name, "lora_path": str(path.resolve())},
         )
-        response.raise_for_status()
+        if response.is_error:
+            raise RuntimeError(f"vLLM refused adapter {name}: {response.text}")
 
     async def unload_adapter(self, name: str) -> None:
         response = await self._client.post(
             "/unload_lora_adapter", json={"lora_name": name}
         )
-        response.raise_for_status()
+        if response.is_error:
+            raise RuntimeError(f"vLLM could not unload adapter {name}: {response.text}")
 
     async def aclose(self) -> None:
         await self._client.aclose()

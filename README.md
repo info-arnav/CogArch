@@ -52,14 +52,17 @@ Training problems: MBPP, excluding every task in MBPP+, with 50 held out for val
 
 ## Running on a GPU server
 
-Tested target: 1× AMD MI300X (ROCm). vLLM runs in AMD's container; the experiment runs in a local venv.
+Tested target: 1× AMD MI300X (ROCm). vLLM and the experiment both run from AMD's vLLM image, in two containers.
 
 ```bash
-scripts/setup_server.sh          # venv, PyTorch (ROCm), TRL/PEFT, EvalPlus, datasets
+scripts/setup_server.sh          # Docker, image, experiment container, datasets
 make serve                       # vLLM with runtime LoRA loading on :8000
 make smoke                       # checks every component, then a tiny end-to-end run
 make pilot                       # 2 configs × 2 replicates, in the background
+make dashboard                   # live dashboard on the server's localhost:8080
 ```
+
+To view the dashboard from your machine: `ssh -L 8080:localhost:8080 root@<server>`, then open http://localhost:8080.
 
 Results land in `data/runs/<run>/`. Each run directory has:
 - `report.json`
