@@ -57,5 +57,18 @@ def dashboard(
     serve(Path(runs), port=port)
 
 
+@app.command()
+def analyze(
+    runs: str = typer.Option("data/runs", help="Directory containing run folders"),
+    out: str = typer.Option("data/analysis", help="Where to write tables and figures"),
+) -> None:
+    """Aggregate finished runs into tables (summary.md) and figures."""
+    from pathlib import Path
+
+    from src.analysis import analyze as run_analysis
+
+    print(run_analysis(Path(runs), Path(out)))
+
+
 if __name__ == "__main__":
     app()

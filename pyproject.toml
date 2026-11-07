@@ -43,6 +43,7 @@ research = [
     "accelerate>=1.11.0",
     "sentence-transformers>=5.0.0",
     "evalplus>=0.3.1",
+    "matplotlib>=3.8",
 ]
 dev = [
     "pytest>=8.0.0",
@@ -102,6 +103,8 @@ module = [
     "evalplus",
     "evalplus.*",
     "sentence_transformers",
+    "matplotlib",
+    "matplotlib.*",
 ]
 ignore_missing_imports = true
 
