@@ -15,6 +15,8 @@ import httpx
 
 from src.models.code import Message
 
+TRANSPORT_RETRIES = 5
+
 
 class ChatModel(Protocol):
     async def chat(
@@ -34,8 +36,12 @@ class InferenceClient:
         timeout_seconds: float = 300.0,
         max_concurrent_requests: int = 64,
     ) -> None:
+        # Expire idle connections before the server's 5s keep-alive does, so a
+        # request is never written to a socket the server is closing.
         self._client = httpx.AsyncClient(
-            base_url=base_url.rstrip("/"), timeout=timeout_seconds
+            base_url=base_url.rstrip("/"),
+            timeout=timeout_seconds,
+            limits=httpx.Limits(keepalive_expiry=2.0),
         )
         self._slots = asyncio.Semaphore(max_concurrent_requests)
 
@@ -47,19 +53,28 @@ class InferenceClient:
         max_tokens: int,
         seed: int,
     ) -> str:
+        payload = {
+            "model": model,
+            "messages": [m.model_dump() for m in messages],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "seed": seed,
+        }
         async with self._slots:
-            response = await self._client.post(
-                "/chat/completions",
-                json={
-                    "model": model,
-                    "messages": [m.model_dump() for m in messages],
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                    "seed": seed,
-                },
-            )
+            response = await self._post_with_retry("/chat/completions", payload)
         response.raise_for_status()
         return str(response.json()["choices"][0]["message"]["content"] or "")
+
+    async def _post_with_retry(self, path: str, payload: dict) -> httpx.Response:
+        """POST, retrying dropped connections. Seeded requests are idempotent."""
+        for attempt in range(TRANSPORT_RETRIES):
+            try:
+                return await self._client.post(path, json=payload)
+            except httpx.TransportError:
+                if attempt == TRANSPORT_RETRIES - 1:
+                    raise
+                await asyncio.sleep(0.5 * 2**attempt)
+        raise AssertionError("unreachable")
 
     async def load_adapter(self, name: str, path: Path) -> None:
         """Register a LoRA adapter under `name`. `path` must exist on the server host."""
