@@ -226,80 +226,147 @@ def main_table(
 # ── figures ─────────────────────────────────────────────────────────────────
 
 BAR_COLORS = {
-    "Qwen2.5-1.5B": "#b8b6ae",
-    "majority": "#8a8984",
-    "Brain, untrained": "#9bc1ec",
+    "Qwen2.5-1.5B": "#c9c7bf",
+    "majority": "#9a9890",
+    "Brain, untrained": "#a9c8ee",
     "Brain, trained alone": COLORS["solo"],
     "Brain, trained in pair": COLORS["pair"],
 }
+SHORT = {
+    "Qwen2.5-1.5B": "1.5B",
+    "Brain, untrained": "Brain, untrained",
+    "Brain, trained alone": "Brain, trained alone",
+    "Brain, trained in pair": "Brain, trained in pair",
+    "Qwen2.5-3B": "3B (single)",
+    "Qwen2.5-7B": "7B (single)",
+}
+
+
+def _short(label: str) -> str:
+    if ", majority of " in label:
+        return f"1.5B, vote of {label.rsplit(' ', 1)[1]}"
+    return SHORT.get(label, label)
+
+
+DOMAIN_GROUPS = {
+    "Code": ["humaneval", "mbpp"],
+    "Math": ["gsm8k", "math500"],
+    "Reasoning": ["arc_challenge"],
+    "Social & emotion": ["siqa", "emobench_eu", "emobench_ea"],
+}
+
+
+def _group_mean(values: dict[str, list[float]], benches: list[str]) -> list[float]:
+    """Per-agent (or single) means over a group of benchmarks, in percent."""
+    present = [values[b] for b in benches if b in values]
+    if len(present) != len(benches):
+        return []
+    n = min(len(v) for v in present)
+    return [100 * statistics.mean(v[i] for v in present) for i in range(n)]
 
 
 def fig_headline(
     rows: list[tuple[str, int, dict[str, list[float]]]], benches: list[str], out: Path
 ) -> str | None:
-    bars = [r for r in rows if r[1] > 1 or r[0] == "Qwen2.5-1.5B"]
-    lines = [r for r in rows if r[0] in REFERENCE_STYLE]
-    if not bars:
+    """(a) Average accuracy of every system, larger models as labelled dashed
+    lines. (b) Gain over the plain 1.5B model per domain."""
+    small = [r for r in rows if r[0] not in REFERENCE_STYLE]
+    big = [r for r in rows if r[0] in REFERENCE_STYLE]
+    if not small:
         return None
     plt = _plt()
-    panels = [*benches, "average"]
-    ncols = 5
-    nrows = -(-len(panels) // ncols)
-    fig, axes = plt.subplots(
-        nrows, ncols, figsize=(FULL_WIDTH, 1.55 * nrows), sharey=False
+    fig, (ax_a, ax_b) = plt.subplots(
+        1, 2, figsize=(FULL_WIDTH, 2.3), gridspec_kw={"width_ratios": [1, 1.7]}
     )
-    axes = [ax for row in (axes if nrows > 1 else [axes]) for ax in row]
 
-    def value(values: dict[str, list[float]], b: str) -> list[float]:
-        if b != "average":
-            return [100 * v for v in values.get(b, [])]
-        means = [statistics.mean(values[x]) for x in benches if x in values]
-        return [100 * statistics.mean(means)] if len(means) == len(benches) else []
-
-    for ax, b in zip(axes, panels):
-        for i, (label, _, values) in enumerate(bars):
-            vals = value(values, b)
-            if not vals:
-                continue
-            color = BAR_COLORS.get(label, BAR_COLORS["majority"])
-            ax.bar(
-                i,
-                statistics.mean(vals),
-                0.75,
-                color=color,
-                yerr=_ci95(vals) or None,
-                error_kw={"elinewidth": 0.6, "capsize": 1.5},
-                label=label,
-            )
-        for label, _, values in lines:
-            vals = value(values, b)
-            if vals:
-                ax.axhline(
-                    vals[0],
-                    color="#3a3936",
-                    linewidth=0.8,
-                    linestyle=REFERENCE_STYLE[label],
-                    label=f"{label} (single)",
-                )
-        ax.set_title(BENCH_LABELS.get(b, "Average"))
-        ax.set_xticks([])
-        _style(ax)
-        lo = min(
-            [statistics.mean(value(v, b)) for _, _, v in rows if value(v, b)] or [0]
+    # (a) average over all benchmarks
+    for i, (label, _, values) in enumerate(small):
+        vals = _group_mean(values, benches)
+        if not vals:
+            continue
+        m = statistics.mean(vals)
+        ax_a.bar(
+            i,
+            m,
+            0.72,
+            color=BAR_COLORS.get(label, BAR_COLORS["majority"]),
+            yerr=_ci95(vals) if len(vals) > 1 else None,
+            error_kw={"elinewidth": 0.6, "capsize": 1.5},
+            label=_short(label),
         )
-        ax.set_ylim(max(0, lo - 12), None)
-    for ax in axes[len(panels) :]:
-        ax.axis("off")
-    handles, labels = axes[0].get_legend_handles_labels()
+        ax_a.text(
+            i, m - 2.5, f"{m:.1f}", ha="center", va="top", fontsize=6, color="#2b2a28"
+        )
+    for label, _, values in big:
+        vals = _group_mean(values, benches)
+        if vals:
+            ax_a.axhline(
+                vals[0],
+                color="#3a3936",
+                linewidth=0.8,
+                linestyle=REFERENCE_STYLE[label],
+            )
+            ax_a.text(
+                len(small) - 0.45,
+                vals[0] + 0.8,
+                _short(label),
+                ha="right",
+                va="bottom",
+                fontsize=6,
+                color="#3a3936",
+            )
+    ax_a.set_xticks([])
+    ax_a.set_ylim(0, 100)
+    ax_a.set_ylabel("Accuracy (%)")
+    ax_a.set_xlim(-0.6, len(small) - 0.4)
+    ax_a.set_title("a  Average over 8 benchmarks", loc="left")
+
+    # (b) gain over the plain 1.5B model, per domain
+    base = next((r for r in rows if r[0] == "Qwen2.5-1.5B"), None)
+    if base is not None:
+        others = [r for r in rows if r[0] != "Qwen2.5-1.5B"]
+        groups = list(DOMAIN_GROUPS)
+        width = 0.8 / max(1, len(others))
+        for k, (label, _, values) in enumerate(others):
+            gains, errs, multi = [], [], False
+            for g in groups:
+                vals = _group_mean(values, DOMAIN_GROUPS[g])
+                ref = _group_mean(base[2], DOMAIN_GROUPS[g])
+                gains.append(statistics.mean(vals) - ref[0] if vals and ref else 0.0)
+                errs.append(_ci95(vals) if len(vals) > 1 else 0.0)
+                multi = multi or len(vals) > 1
+            xs = [i + (k - (len(others) - 1) / 2) * width for i in range(len(groups))]
+            is_big = label in REFERENCE_STYLE
+            ax_b.bar(
+                xs,
+                gains,
+                width * 0.9,
+                color=(
+                    "white" if is_big else BAR_COLORS.get(label, BAR_COLORS["majority"])
+                ),
+                edgecolor="#3a3936" if is_big else "none",
+                hatch="////" if label == "Qwen2.5-7B" else ("...." if is_big else None),
+                linewidth=0.5,
+                yerr=errs if multi else None,
+                error_kw={"elinewidth": 0.6, "capsize": 1.2},
+                label=_short(label) if is_big else None,
+            )
+        ax_b.axhline(0, color="#3a3936", linewidth=0.6)
+        ax_b.set_xticks(range(len(groups)), groups)
+        ax_b.set_ylabel("Gain over Qwen2.5-1.5B (pp)")
+        ax_b.set_title("b  Gain by domain", loc="left")
+
+    handles, labels = ax_a.get_legend_handles_labels()
+    h2, l2 = ax_b.get_legend_handles_labels()
     fig.legend(
-        handles,
-        labels,
-        frameon=False,
-        ncol=4,
+        handles + h2,
+        labels + l2,
+        ncol=len(labels + l2),
         loc="upper center",
-        bbox_to_anchor=(0.5, 1.07),
+        bbox_to_anchor=(0.5, 1.08),
+        columnspacing=1.2,
+        handlelength=1.4,
     )
-    fig.supylabel("Accuracy (%)", fontsize=8)
     fig.tight_layout()
     return _save(fig, out, "headline")
 
@@ -353,7 +420,7 @@ def fig_learning_curves(groups: dict[str, list[dict[str, Any]]], out: Path) -> s
                 alpha=0.15,
                 linewidth=0,
             )
-        ax.set_title(d)
+        ax.set_title(d.capitalize())
         ax.set_xlabel("Cycle")
         _style(ax)
     axes[0].set_ylabel("Validation accuracy (%)")
@@ -416,18 +483,23 @@ def fig_specialisation(
                 label=s,
             )
         ax.axhline(25, color="#8a8984", linewidth=0.8, linestyle="--")
-        ax.set_ylabel("Share (%)")
-        ax.set_title(label)
+        ax.text(
+            len(domains) - 0.5,
+            25.6,
+            "uniform",
+            ha="right",
+            va="bottom",
+            fontsize=5.8,
+            color="#8a8984",
+        )
+        ax.set_ylabel("Share of training (%)")
+        ax.set_ylim(0, max(50.0, ax.get_ylim()[1]))
+        ax.set_title(label, loc="left")
         _style(ax)
-    axes[-1].set_xticks(range(len(domains)), domains)
+    axes[-1].set_xticks(range(len(domains)), [d.capitalize() for d in domains])
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(
-        handles,
-        labels,
-        frameon=False,
-        ncol=4,
-        loc="upper center",
-        bbox_to_anchor=(0.5, 1.06),
+    axes[0].legend(
+        handles, labels, ncol=4, loc="upper left", handlelength=1.0, columnspacing=0.9
     )
     fig.tight_layout()
     return _save(fig, out, "specialisation")
@@ -477,131 +549,181 @@ def cycle_table(groups: dict[str, list[dict[str, Any]]]) -> str:
 
 
 def fig_method(out: Path) -> str:
-    """Method overview: one agent's deliberation, the world, sharing, and sleep."""
+    """Method overview in the style of Multiagent Finetuning (Fig. 2): grouped
+    panels with dashed outlines, equal boxes, right-angle arrows, few colours."""
     plt = _plt()
-    from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
+    from matplotlib.patches import FancyBboxPatch, Rectangle
 
-    fig, ax = plt.subplots(figsize=(FULL_WIDTH, 2.5))
+    ink, line = "#2b2a28", "#5c5b57"
+    fills = {
+        "spec": "#e8f0fb",
+        "coord": "#efeaf8",
+        "world": "#fbece4",
+        "plain": "#f4f3f0",
+    }
+    fig, ax = plt.subplots(figsize=(FULL_WIDTH, 2.9))
     ax.set_xlim(0, 100)
-    ax.set_ylim(0, 40)
+    ax.set_ylim(0, 47)
     ax.axis("off")
+    ax.grid(False)
 
     def box(
-        x: float,
-        y: float,
+        cx: float,
+        cy: float,
         w: float,
         h: float,
         text: str,
-        color: str = "#f0efec",
+        fill: str,
         bold: bool = False,
+        size: float = 6.3,
     ) -> None:
         ax.add_patch(
             FancyBboxPatch(
+                (cx - w / 2, cy - h / 2),
+                w,
+                h,
+                boxstyle="round,pad=0,rounding_size=0.9",
+                linewidth=0.7,
+                edgecolor=line,
+                facecolor=fill,
+            )
+        )
+        ax.text(
+            cx,
+            cy,
+            text,
+            ha="center",
+            va="center",
+            fontsize=size,
+            color=ink,
+            fontweight="bold" if bold else "normal",
+            linespacing=1.15,
+        )
+
+    def panel(x: float, y: float, w: float, h: float, title: str) -> None:
+        ax.add_patch(
+            Rectangle(
                 (x, y),
                 w,
                 h,
-                boxstyle="round,pad=0.3,rounding_size=0.8",
-                linewidth=0.6,
-                edgecolor="#52514e",
-                facecolor=color,
+                fill=False,
+                linestyle=(0, (3, 2)),
+                linewidth=0.7,
+                edgecolor="#8a8984",
             )
         )
         ax.text(
             x + w / 2,
-            y + h / 2,
-            text,
+            y + h + 1.0,
+            title,
             ha="center",
-            va="center",
-            fontsize=6.5,
-            fontweight="bold" if bold else "normal",
+            va="bottom",
+            fontsize=7.2,
+            fontweight="bold",
+            color=ink,
         )
 
     def arrow(
-        x1: float,
-        y1: float,
-        x2: float,
-        y2: float,
-        text: str = "",
-        rad: float = 0.0,
-        tx: float | None = None,
-        ty: float | None = None,
+        points: list[tuple[float, float]],
+        label: str = "",
+        at: int = 0,
+        dx: float = 0.0,
+        dy: float = 1.0,
     ) -> None:
-        ax.add_patch(
-            FancyArrowPatch(
-                (x1, y1),
-                (x2, y2),
-                arrowstyle="-|>",
-                mutation_scale=7,
-                linewidth=0.6,
-                color="#52514e",
-                connectionstyle=f"arc3,rad={rad}",
-            )
+        xs, ys = zip(*points)
+        ax.plot(
+            xs[:-1] + (xs[-1],),
+            ys[:-1] + (ys[-1],),
+            color=line,
+            linewidth=0.7,
+            solid_capstyle="butt",
         )
-        if text:
+        ax.annotate(
+            "",
+            xy=points[-1],
+            xytext=points[-2],
+            arrowprops={
+                "arrowstyle": "-|>",
+                "color": line,
+                "lw": 0.7,
+                "mutation_scale": 6.5,
+                "shrinkA": 0,
+                "shrinkB": 0,
+            },
+        )
+        if label:
+            (x1, y1), (x2, y2) = points[at], points[at + 1]
             ax.text(
-                tx if tx is not None else (x1 + x2) / 2,
-                ty if ty is not None else (y1 + y2) / 2 + 1.2,
-                text,
+                (x1 + x2) / 2 + dx,
+                (y1 + y2) / 2 + dy,
+                label,
                 ha="center",
-                fontsize=5.5,
-                color="#52514e",
+                va="bottom",
+                fontsize=5.8,
+                color="#5c5b57",
+                style="italic",
             )
 
-    ax.text(1, 37.5, "Agent (×2 in a pair)", fontsize=7, fontweight="bold")
-    box(1, 18, 11, 6, "Task\n(code · math ·\nreasoning · social)")
-    for i, s in enumerate(SPECIALISTS):
-        box(
-            16,
-            31 - i * 7.5,
-            13,
-            5,
-            f"{s}\nround 1 (alone)",
-            SPECIALIST_COLORS[s] + "40",
-        )
-        box(
-            33,
-            31 - i * 7.5,
-            13,
-            5,
-            f"{s}\nround 2 (discuss)",
-            SPECIALIST_COLORS[s] + "40",
-        )
-        arrow(12, 21, 16, 33.5 - i * 7.5)
-        arrow(29, 33.5 - i * 7.5, 33, 33.5 - i * 7.5)
-        arrow(46, 33.5 - i * 7.5, 50, 20)
-    ax.text(
-        31,
-        37.6,
-        "each sees the others' round-1 answers",
-        ha="center",
-        fontsize=5.5,
-        color="#52514e",
-    )
-    box(50, 17, 12, 6, "Coordinator\nweighs arguments,\ndecides", "#e6e3f7", bold=True)
-    box(66, 17, 10, 6, 'World\nsays only\n"wrong"', "#fbe3d6")
-    arrow(62, 20, 66, 20)
-    arrow(71, 23, 71, 31, "accepted")
-    box(64, 31, 15, 5, "Answer shared\nwith partner agent", "#dcebfa")
-    arrow(
-        71,
-        17,
-        22,
-        8.5,
-        'wrong → retry (previous answer + "wrong")',
-        rad=-0.25,
-        tx=47,
-        ty=3.2,
-    )
+    names = ["Logical", "Creative", "Skeptical", "Empathetic"]
+    cols = [12.0, 24.5, 37.0, 49.5]
+    coord_x = 30.75
+    arrow_r = "$\\rightarrow$"
+
+    # ── waking: one agent on one task ──
+    panel(2, 3, 58, 40, "Waking: one agent works on a task")
     box(
-        81,
-        17,
-        18,
-        15,
-        "Sleep (each cycle)\n\n1 reflect → lessons\n2 who learns: solo winner\n   or domain owner\n3 DPO + NLL on each\n   specialist's own LoRA\n4 validate / roll back",
-        "#f0efec",
+        coord_x,
+        38.0,
+        48.5,
+        4.0,
+        "Task:  code  ·  math  ·  reasoning  ·  social",
+        fills["plain"],
     )
-    arrow(79, 33.5, 88, 32.2)
-    box(1, 2, 14, 7, "Memory\nworking · episodic ·\nlessons", "#f0efec")
-    arrow(8, 9, 8, 18)
+    for x, n in zip(cols, names):
+        box(x, 29.0, 10.5, 4.8, f"{n}\nround 1: alone", fills["spec"], size=6.0)
+        box(x, 19.5, 10.5, 4.8, f"{n}\nround 2: discuss", fills["spec"], size=6.0)
+        arrow([(x, 36.0), (x, 31.4)])
+        arrow([(x, 26.6), (x, 21.9)])
+    box(
+        coord_x,
+        9.0,
+        22,
+        4.8,
+        "Coordinator\nweighs the arguments, decides",
+        fills["coord"],
+    )
+    for x in cols:
+        tx = coord_x + (x - coord_x) * 0.38
+        arrow([(x, 17.1), (x, 14.0), (tx, 14.0), (tx, 11.4)])
+    box(11.0, 9.0, 11.5, 4.8, "Memory\nepisodes, lessons", fills["plain"], size=5.8)
+    arrow([(16.75, 9.0), (coord_x - 11, 9.0)])
+
+    # ── environment and partner ──
+    box(71, 9.0, 13, 4.8, 'World\nsays only "wrong"', fills["world"])
+    arrow([(coord_x + 11, 9.0), (64.5, 9.0)])
+    arrow(
+        [(71, 6.6), (71, 4.6), (4.2, 4.6), (4.2, 29.0), (6.75, 29.0)],
+        f"wrong {arrow_r} retry",
+        at=1,
+        dx=8,
+        dy=0.35,
+    )
+    box(71, 23.0, 13, 4.8, "Partner agent\n(same design)", fills["plain"])
+    arrow([(71, 11.4), (71, 20.6)], f"accepted {arrow_r}\nshared", dx=-5.2, dy=-2.2)
+    arrow([(60, 38.0), (81, 38.0)], "end of cycle\n(100 tasks)", dy=0.5)
+
+    # ── sleep ──
+    panel(81, 3, 17, 40, "Sleep: after each cycle")
+    steps = [
+        "Reflect\nedit lessons",
+        "Credit\nsolo winner, else\ndomain owner",
+        "Train\nDPO + NLL on each\npart's own LoRA",
+        "Validate\nroll back if worse",
+    ]
+    ys = [36.0, 26.5, 17.0, 7.5]
+    for y, t in zip(ys, steps):
+        box(89.5, y, 14.5, 6.4, t, fills["plain"], size=5.9)
+    for y1, y2 in zip(ys[:-1], ys[1:]):
+        arrow([(89.5, y1 - 3.2), (89.5, y2 + 3.2)])
     fig.tight_layout()
     return _save(fig, out, "method")
