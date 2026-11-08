@@ -96,13 +96,16 @@ def dashboard(
 def analyze(
     runs: str = typer.Option("data/runs", help="Directory containing run folders"),
     out: str = typer.Option("data/analysis", help="Where to write tables and figures"),
+    include_unfinished: bool = typer.Option(
+        False, help="Also use runs stopped before their final benchmarks"
+    ),
 ) -> None:
-    """Aggregate finished runs into tables (summary.md) and figures."""
+    """Aggregate runs into tables (summary.md, tables.tex) and figures."""
     from pathlib import Path
 
     from src.analysis import analyze as run_analysis
 
-    print(run_analysis(Path(runs), Path(out)))
+    print(run_analysis(Path(runs), Path(out), include_unfinished))
 
 
 if __name__ == "__main__":

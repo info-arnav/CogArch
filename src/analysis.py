@@ -33,6 +33,7 @@ def _signed(values: list[float]) -> str:
 
 def load(
     runs_root: Path,
+    include_unfinished: bool = False,
 ) -> tuple[dict[str, Any] | None, dict[str, list[dict[str, Any]]]]:
     baseline = None
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -42,7 +43,9 @@ def load(
         if path.parent.name == "baseline":
             baseline = data
             continue
-        if not data["final_benchmarks"]:
+        if not data["cycles"] or (
+            not data["final_benchmarks"] and not include_unfinished
+        ):
             continue
         agents = data["config"]["agents"]["names"]
         data["agents"] = agents
@@ -221,10 +224,10 @@ def validation_series(runs: list[dict[str, Any]]) -> list[list[float]]:
     return series
 
 
-def analyze(runs_root: Path, out: Path) -> Path:
+def analyze(runs_root: Path, out: Path, include_unfinished: bool = False) -> Path:
     from src import figures as extra
 
-    baseline, groups = load(runs_root)
+    baseline, groups = load(runs_root, include_unfinished)
     if not groups and baseline is None:
         raise SystemExit(f"No finished runs under {runs_root}")
     out.mkdir(parents=True, exist_ok=True)
