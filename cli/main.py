@@ -122,13 +122,23 @@ def analyze(
     include_unfinished: bool = typer.Option(
         False, help="Also use runs stopped before their final benchmarks"
     ),
+    compare: str = typer.Option(
+        "", help="Earlier version's runs folder, for the specialisation comparison"
+    ),
 ) -> None:
     """Aggregate runs into tables (summary.md, tables.tex) and figures."""
     from pathlib import Path
 
     from src.analysis import analyze as run_analysis
 
-    print(run_analysis(Path(runs), Path(out), include_unfinished))
+    print(
+        run_analysis(
+            Path(runs),
+            Path(out),
+            include_unfinished,
+            Path(compare) if compare else None,
+        )
+    )
 
 
 if __name__ == "__main__":

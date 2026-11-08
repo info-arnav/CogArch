@@ -43,6 +43,8 @@ def load(
         if path.parent.name == "baseline":
             baseline = data
             continue
+        if path.parent.name == "references":
+            continue
         if not data["cycles"] or (
             not data["final_benchmarks"] and not include_unfinished
         ):
@@ -224,22 +226,54 @@ def validation_series(runs: list[dict[str, Any]]) -> list[list[float]]:
     return series
 
 
-def analyze(runs_root: Path, out: Path, include_unfinished: bool = False) -> Path:
+def analyze(
+    runs_root: Path,
+    out: Path,
+    include_unfinished: bool = False,
+    compare_runs: Path | None = None,
+) -> Path:
     from src import figures as extra
+    from src import paper
 
     baseline, groups = load(runs_root, include_unfinished)
     if not groups and baseline is None:
         raise SystemExit(f"No finished runs under {runs_root}")
+    references = None
+    ref_path = runs_root / "references" / "report.json"
+    if ref_path.exists():
+        references = json.loads(ref_path.read_text())
+        references["dir"] = ref_path.parent
     out.mkdir(parents=True, exist_ok=True)
-    written: list[str] = []
+    written: list[str] = [paper.fig_method(out)]
     comparison = "_Needs finished pair and solo runs._"
+    main_md = "_Needs the baseline run._"
+    rows = paper.systems(baseline, references, groups)
+    if rows and baseline:
+        benches = list(baseline["config"]["evaluation"]["benchmarks"])
+        main_md, main_tex = paper.main_table(rows, benches)
+        (out / "main_table.tex").write_text(main_tex)
+        headline = paper.fig_headline(rows, benches, out)
+        if headline:
+            written.append(headline)
+    cycles_md = ""
     if groups:
-        written.append(extra.fig_validation_overall(groups, out))
-        written.append(extra.fig_responsibility(groups, out))
+        written.append(paper.fig_learning_curves(groups, out))
+        versions = {"this version": [r for rs in groups.values() for r in rs]}
+        if compare_runs is not None:
+            _, earlier = load(compare_runs, include_unfinished=True)
+            versions = {
+                "v1: credit to everyone right after discussion": [
+                    r for rs in earlier.values() for r in rs
+                ],
+                "v2: brain-inspired competition": versions["this version"],
+            }
+        spec = paper.fig_specialisation(versions, out)
+        if spec:
+            written.append(spec)
+        cycles_md = paper.cycle_table(groups)
         changes = extra.run_level_changes(groups, baseline)
         comparison = extra.comparison_table(changes)
         written.append(extra.fig_benchmark_change(changes, out))
-        written.append(extra.fig_validation_by_domain(groups, out))
         written.append(extra.fig_specialisation_heatmaps(groups, out))
         written.append(extra.fig_dynamics(groups, out))
         for optional in (
@@ -258,7 +292,11 @@ def analyze(runs_root: Path, out: Path, include_unfinished: bool = False) -> Pat
             "Values are mean ± SD across agents (pair: 2 agents × replicates; solo: 1 agent × "
             "replicates). Agent and specialist modes use a fixed subset per benchmark "
             "(EvalPlus code benchmarks in full); plain mode uses full benchmarks.",
-            "## Benchmarks",
+            "## Main results (all systems on the same problems)",
+            main_md,
+            "## Validation accuracy by cycle",
+            cycles_md or "_No runs yet._",
+            "## Benchmarks by evaluation mode",
             benchmark_table(baseline, groups),
             "## Pair vs solo (run level: each run's agents averaged first)",
             "Change = trained − untrained, whole agent, percentage points. CI: bootstrap "
