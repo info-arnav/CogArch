@@ -15,14 +15,6 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-COLORS = {"pair": "#2a78d6", "solo": "#eb6834"}
-SPECIALIST_COLORS = {
-    "logical": "#2a78d6",
-    "creative": "#eb6834",
-    "skeptical": "#1baf7a",
-    "empathetic": "#eda100",
-}
-
 
 def _ms(values: list[float], scale: float = 100.0) -> str:
     if not values:
@@ -229,106 +221,30 @@ def validation_series(runs: list[dict[str, Any]]) -> list[list[float]]:
     return series
 
 
-def _style(ax: Any) -> None:
-    for side in ("top", "right"):
-        ax.spines[side].set_visible(False)
-    ax.grid(axis="y", color="#ecebe7", linewidth=0.8)
-    ax.set_axisbelow(True)
-
-
-def figures(groups: dict[str, list], out: Path) -> list[str]:
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    written = []
-    fig, ax = plt.subplots(figsize=(6, 3.6))
-    for condition, runs in groups.items():
-        series = validation_series(runs)
-        xs = list(range(len(series)))
-        means = [100 * statistics.mean(v) for v in series]
-        sds = [100 * (statistics.stdev(v) if len(v) > 1 else 0) for v in series]
-        ax.plot(
-            xs,
-            means,
-            color=COLORS[condition],
-            linewidth=2,
-            marker="o",
-            markersize=5,
-            label=f"{condition} (n={len(series[0])} agents)",
-        )
-        ax.fill_between(
-            xs,
-            [m - s for m, s in zip(means, sds)],
-            [m + s for m, s in zip(means, sds)],
-            color=COLORS[condition],
-            alpha=0.12,
-            linewidth=0,
-        )
-    ax.set_xlabel("Cycle (0 = untrained)")
-    ax.set_ylabel("Validation accuracy, mean over domains (%)")
-    ax.legend(frameon=False)
-    _style(ax)
-    fig.tight_layout()
-    fig.savefig(out / "validation.png", dpi=200)
-    plt.close(fig)
-    written.append("validation.png")
-
-    for condition, runs in groups.items():
-        domains = runs[0]["config"]["data"]["domains"]
-        specialists = list(SPECIALIST_COLORS)
-        fig, axes = plt.subplots(
-            1, len(domains), figsize=(3 * len(domains), 3), sharey=True
-        )
-        for ax, d in zip(axes, domains):
-            n = max(len(r["cycles"]) for r in runs)
-            for s in specialists:
-                ys = []
-                for i in range(n + 1):
-                    vals = []
-                    for run in runs:
-                        for a in run["agents"]:
-                            src = (
-                                run["baseline_validation_specialists"][a]
-                                if i == 0
-                                else (
-                                    run["cycles"][i - 1]["validation_specialists"][a]
-                                    if i - 1 < len(run["cycles"])
-                                    else None
-                                )
-                            )
-                            if src and d in src.get(s, {}):
-                                vals.append(src[s][d])
-                    ys.append(100 * statistics.mean(vals) if vals else float("nan"))
-                ax.plot(
-                    range(n + 1),
-                    ys,
-                    color=SPECIALIST_COLORS[s],
-                    linewidth=2,
-                    marker="o",
-                    markersize=4,
-                    label=s,
-                )
-            ax.set_title(d)
-            ax.set_xlabel("Cycle")
-            _style(ax)
-        axes[0].set_ylabel("Specialist alone, accuracy (%)")
-        axes[-1].legend(frameon=False, fontsize=8)
-        fig.tight_layout()
-        name = f"specialisation_{condition}.png"
-        fig.savefig(out / name, dpi=200)
-        plt.close(fig)
-        written.append(name)
-    return written
-
-
 def analyze(runs_root: Path, out: Path) -> Path:
+    from src import figures as extra
+
     baseline, groups = load(runs_root)
     if not groups and baseline is None:
         raise SystemExit(f"No finished runs under {runs_root}")
     out.mkdir(parents=True, exist_ok=True)
-    written = figures(groups, out) if groups else []
+    written: list[str] = []
+    comparison = "_Needs finished pair and solo runs._"
+    if groups:
+        written.append(extra.fig_validation_overall(groups, out))
+        written.append(extra.fig_responsibility(groups, out))
+        changes = extra.run_level_changes(groups, baseline)
+        comparison = extra.comparison_table(changes)
+        written.append(extra.fig_benchmark_change(changes, out))
+        written.append(extra.fig_validation_by_domain(groups, out))
+        written.append(extra.fig_specialisation_heatmaps(groups, out))
+        written.append(extra.fig_dynamics(groups, out))
+        for optional in (
+            extra.fig_specialist_benchmarks(groups, baseline, out),
+            extra.fig_training(groups, out),
+        ):
+            if optional:
+                written.append(optional)
     names = [r["name"] for runs in groups.values() for r in runs]
     summary = "\n\n".join(
         [
@@ -341,6 +257,10 @@ def analyze(runs_root: Path, out: Path) -> Path:
             "(EvalPlus code benchmarks in full); plain mode uses full benchmarks.",
             "## Benchmarks",
             benchmark_table(baseline, groups),
+            "## Pair vs solo (run level: each run's agents averaged first)",
+            "Change = trained − untrained, whole agent, percentage points. CI: bootstrap "
+            "95%; p: exact two-sided permutation test over runs.",
+            comparison,
             "## Each specialist alone on the benchmarks (own persona)",
             specialist_benchmark_table(baseline, groups),
             "## Specialisation during training (validation, specialist alone)",
@@ -353,4 +273,5 @@ def analyze(runs_root: Path, out: Path) -> Path:
     )
     path = out / "summary.md"
     path.write_text(summary + "\n")
+    (out / "tables.tex").write_text(extra.markdown_tables_to_latex(summary))
     return path
