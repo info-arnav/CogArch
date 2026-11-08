@@ -382,10 +382,10 @@ def fig_specialist_benchmarks(
 def fig_dynamics(groups: dict[str, list[dict[str, Any]]], out: Path) -> str:
     plt = _plt()
     panels = [
-        ("learned_from_peer", "Learned from partner (per agent)", 1.0),
-        ("discussion_changed", "Discussion changed answers (%)", 100.0),
-        ("discussion_fixed", "Changed answers fixed (%)", 100.0),
-        ("answer_divergence", "Agents' answers differ (%)", 100.0),
+        ("learned_from_peer", "Learned from partner\n(problems per agent)", 1.0),
+        ("discussion_changed", "Answers changed\nby discussion (%)", 100.0),
+        ("discussion_fixed", "Changed answers\nwrong → right (%)", 100.0),
+        ("answer_divergence", "Agents' answers\ndiffer (%)", 100.0),
     ]
     fig, axes = plt.subplots(1, len(panels), figsize=(FULL_WIDTH, 1.8))
     for ax, (key, title, scale) in zip(axes, panels):
@@ -412,7 +412,7 @@ def fig_dynamics(groups: dict[str, list[dict[str, Any]]], out: Path) -> str:
                 markersize=4,
                 label=condition,
             )
-        ax.set_title(title, fontsize=10)
+        ax.set_title(title)
         ax.set_xlabel("Cycle")
         _style(ax)
     axes[0].legend(frameon=False)
@@ -460,7 +460,7 @@ def fig_training(groups: dict[str, list[dict[str, Any]]], out: Path) -> str | No
                 markersize=4,
                 label=role,
             )
-        ax.set_title(title, fontsize=10)
+        ax.set_title(title)
         ax.set_xlabel("Cycle")
         _style(ax)
     axes[-1].legend(frameon=False, fontsize=8)
