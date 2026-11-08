@@ -548,24 +548,20 @@ def cycle_table(groups: dict[str, list[dict[str, Any]]]) -> str:
     return "\n".join(lines)
 
 
-def fig_method(out: Path) -> str:
-    """Method overview in the style of Multiagent Finetuning (Fig. 2): grouped
-    panels with dashed outlines, equal boxes, right-angle arrows, few colours."""
-    plt = _plt()
+DIAGRAM_INK, DIAGRAM_LINE = "#2b2a28", "#5c5b57"
+DIAGRAM_FILLS = {
+    "spec": "#e8f0fb",
+    "coord": "#efeaf8",
+    "world": "#fbece4",
+    "plain": "#f4f3f0",
+}
+
+
+def _diagram(ax: Any) -> tuple[Any, Any, Any]:
+    """Box, dashed-panel and right-angle-arrow helpers shared by the diagrams."""
     from matplotlib.patches import FancyBboxPatch, Rectangle
 
-    ink, line = "#2b2a28", "#5c5b57"
-    fills = {
-        "spec": "#e8f0fb",
-        "coord": "#efeaf8",
-        "world": "#fbece4",
-        "plain": "#f4f3f0",
-    }
-    fig, ax = plt.subplots(figsize=(FULL_WIDTH, 2.9))
-    ax.set_xlim(0, 100)
-    ax.set_ylim(0, 47)
-    ax.axis("off")
-    ax.grid(False)
+    ink, line = DIAGRAM_INK, DIAGRAM_LINE
 
     def box(
         cx: float,
@@ -664,6 +660,22 @@ def fig_method(out: Path) -> str:
                 style="italic",
             )
 
+    return box, panel, arrow
+
+
+def fig_method(out: Path) -> str:
+    """Method overview in the style of Multiagent Finetuning (Fig. 2): grouped
+    panels with dashed outlines, equal boxes, right-angle arrows, few colours."""
+    plt = _plt()
+    fills = DIAGRAM_FILLS
+    fig, ax = plt.subplots(figsize=(FULL_WIDTH, 2.9))
+    ax.set_xlim(0, 100)
+    ax.set_ylim(0, 47)
+    ax.axis("off")
+    ax.grid(False)
+
+    box, panel, arrow = _diagram(ax)
+
     names = ["Logical", "Creative", "Skeptical", "Empathetic"]
     cols = [12.0, 24.5, 37.0, 49.5]
     coord_x = 30.75
@@ -727,3 +739,184 @@ def fig_method(out: Path) -> str:
         arrow([(89.5, y1 - 3.2), (89.5, y2 + 3.2)])
     fig.tight_layout()
     return _save(fig, out, "method")
+
+
+def fig_memory(out: Path) -> str:
+    """The agent's three memories: what is recalled before an answer, what is
+    written after it, and how sleep edits the lessons."""
+    plt = _plt()
+    fills = DIAGRAM_FILLS
+    fig, ax = plt.subplots(figsize=(FULL_WIDTH, 2.35))
+    ax.set_xlim(0, 100)
+    ax.set_ylim(0, 40)
+    ax.axis("off")
+    ax.grid(False)
+    box, _, arrow = _diagram(ax)
+
+    for x, title in [(13, "Before answering"), (48, "Memory"), (85, "After answering")]:
+        ax.text(
+            x,
+            38.2,
+            title,
+            ha="center",
+            va="bottom",
+            fontsize=7.2,
+            fontweight="bold",
+            color=DIAGRAM_INK,
+        )
+
+    # the three stores
+    stores = [
+        (
+            31.0,
+            "Working memory  (short-term)\nlast 10 events · cleared every cycle",
+            fills["spec"],
+        ),
+        (
+            19.5,
+            "Episodic memory  (hippocampus)\nevery past task · 3 most similar recalled",
+            fills["coord"],
+        ),
+        (
+            8.0,
+            "Semantic memory  (cortex)\nlessons · 5 most trusted recalled",
+            fills["world"],
+        ),
+    ]
+    for y, text, fill in stores:
+        box(48, y, 27, 7.4, text, fill, size=6.0)
+
+    # recall: task + stores -> prompt
+    box(13, 31.0, 19, 6.0, "New task", fills["plain"])
+    box(
+        13,
+        8.0,
+        19,
+        7.4,
+        "Prompt for each\nspecialist and the\ncoordinator",
+        fills["plain"],
+        size=6.0,
+    )
+    arrow([(13, 28.0), (13, 11.7)], "task text", dx=-4.6, dy=-1.2)
+    for y, _, _ in stores:
+        arrow([(34.5, y), (28.5, y), (28.5, 8.0), (22.5, 8.0)])
+    ax.text(
+        28.0,
+        24.6,
+        "recalled",
+        ha="right",
+        va="center",
+        fontsize=5.8,
+        color=DIAGRAM_LINE,
+        style="italic",
+    )
+
+    # writing: after each task, and in sleep
+    box(
+        85,
+        31.0,
+        22,
+        6.0,
+        "After each task\nrecord what happened",
+        fills["plain"],
+        size=6.0,
+    )
+    arrow([(74, 31.0), (61.5, 31.0)], "a one-line note", dy=0.5)
+    arrow(
+        [(68, 31.0), (68, 21.0), (61.5, 21.0)],
+        "the full\nepisode",
+        at=0,
+        dx=4.2,
+        dy=-2.4,
+    )
+    box(
+        85,
+        8.0,
+        22,
+        7.4,
+        "Sleep: reflect\ncompare wrong and accepted\nanswers; add, agree,\ndisagree or edit lessons",
+        fills["plain"],
+        size=5.7,
+    )
+    arrow(
+        [(61.5, 18.0), (78, 18.0), (78, 11.7)],
+        "this cycle's episodes",
+        at=0,
+        dx=-1.0,
+        dy=-2.6,
+    )
+    arrow([(74, 8.0), (61.5, 8.0)], "edited lessons", dy=0.5)
+
+    fig.tight_layout()
+    return _save(fig, out, "memory")
+
+
+def fig_sleep(out: Path) -> str:
+    """One frozen model with five small adapters, and what sleep does to them."""
+    plt = _plt()
+    fills = DIAGRAM_FILLS
+    fig, ax = plt.subplots(figsize=(FULL_WIDTH, 2.25))
+    ax.set_xlim(0, 100)
+    ax.set_ylim(0, 38)
+    ax.axis("off")
+    ax.grid(False)
+    box, panel, arrow = _diagram(ax)
+
+    # ── left: one model, five adapters ──
+    panel(1, 2, 44, 31, "One brain: a frozen model with five adapters")
+    box(23, 12.0, 39, 6.0, "Qwen2.5-1.5B  (frozen, shared)", fills["plain"], size=6.6)
+    parts = [
+        ("Logical", "spec"),
+        ("Creative", "spec"),
+        ("Skeptical", "spec"),
+        ("Empathetic", "spec"),
+        ("Coordinator", "coord"),
+    ]
+    xs = [7.0, 15.0, 23.0, 31.0, 39.0]
+    for x, (name, fill) in zip(xs, parts):
+        box(x, 25.5, 7.6, 8.0, f"{name}\nLoRA", fills[fill], size=5.6)
+        arrow([(x, 21.5), (x, 15.0)])
+    ax.text(
+        23,
+        5.6,
+        "only the small adapters change",
+        ha="center",
+        va="center",
+        fontsize=5.8,
+        color=DIAGRAM_LINE,
+        style="italic",
+    )
+
+    # ── right: sleep ──
+    panel(49, 2, 50, 31, "Sleep: after every 100 tasks")
+    steps = [
+        (58.5, "Reflect\nedit lessons\n(Sec. 3.3)"),
+        (69.5, "Pick who learns\nfive rules\n(Sec. 3.4)"),
+        (80.5, "Train each part\nDPO + NLL on its\nown adapter"),
+        (91.5, "Validate\nkeep, or\nroll back"),
+    ]
+    for x, text in steps:
+        box(x, 22.0, 9.8, 10.0, text, fills["plain"], size=5.6)
+    for (x1, _), (x2, _) in zip(steps[:-1], steps[1:]):
+        arrow([(x1 + 4.9, 22.0), (x2 - 4.9, 22.0)])
+    ax.text(
+        80.5,
+        11.0,
+        "reference = the part's previous adapter,\nso each step stays small",
+        ha="center",
+        va="center",
+        fontsize=5.6,
+        color=DIAGRAM_LINE,
+        style="italic",
+    )
+    arrow([(80.5, 17.0), (80.5, 13.4)])
+    arrow(
+        [(91.5, 17.0), (91.5, 4.6), (55.0, 4.6), (55.0, 17.0)],
+        "next cycle with the updated parts",
+        at=1,
+        dx=0,
+        dy=0.4,
+    )
+
+    fig.tight_layout()
+    return _save(fig, out, "sleep")

@@ -58,6 +58,14 @@ Training domains: code (MBPP minus MBPP+), maths (GSM8K train), reasoning (ARC-C
 | `config/general_solo.yaml` | One agent alone (same system, no partner) |
 | `cogarch baseline` | The untrained system, benchmarked once |
 
+## Trained adapters
+
+The final LoRA adapter of every part (60 adapters: 4 runs of one agent alone, 4 runs of
+two agents learning together, 5 parts per agent) are on Hugging Face:
+[arnav95600/cogarch-adapters](https://huggingface.co/arnav95600/cogarch-adapters).
+They load on top of [Qwen/Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct)
+with PEFT; the model card shows how.
+
 ## Running on a GPU server
 
 Tested target: 1× AMD MI300X (ROCm). vLLM and the experiment both run from AMD's vLLM image, in two containers.

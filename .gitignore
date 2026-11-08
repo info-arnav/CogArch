@@ -80,3 +80,24 @@ config/*.local.yaml
 # Logs
 *.log
 logs/
+references/
+
+# Experiment outputs (results live on the laptop and on Hugging Face, not in git)
+data/runs/
+data/archive/
+data/analysis/
+data/analysis-server/
+data/figure-preview/
+data/hf-stage/
+data/hf_test.py
+
+# Paper build output
+paper/main.pdf
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.log
+paper/*.out
+
+# Paper draft (kept out of the repository)
+paper/
