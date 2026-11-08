@@ -91,6 +91,37 @@ def evalplus_table(groups: dict[str, list[dict[str, Any]]]) -> str:
     return "\n".join(lines)
 
 
+def plain_table(groups: dict[str, list[dict[str, Any]]]) -> str:
+    """Official EvalPlus protocol: base model alone vs each fine-tuned specialist alone."""
+    lines = [
+        "| Benchmark | Model | Pass@1 | Change vs base (pp) |",
+        "|---|---|---|---|",
+    ]
+    all_runs = [r for runs in groups.values() for r in runs]
+    for (bench, kind), label in BENCH_NAMES.items():
+        base = [
+            r["baseline_plain"][bench][kind]
+            for r in all_runs
+            if bench in r.get("baseline_plain", {})
+        ]
+        if not base:
+            continue
+        lines.append(f"| {label} | base model (official protocol) | {_fmt(base)} | – |")
+        for condition, runs in groups.items():
+            scores, deltas = [], []
+            for run in runs:
+                start = run["baseline_plain"][bench][kind]
+                for per_bench in run.get("final_plain", {}).values():
+                    scores.append(per_bench[bench][kind])
+                    deltas.append(per_bench[bench][kind] - start)
+            if scores:
+                lines.append(
+                    f"| {label} | fine-tuned specialists, {condition} | {_fmt(scores)} | "
+                    f"{_fmt(deltas, signed=True)} |"
+                )
+    return "\n".join(lines)
+
+
 def per_cycle_agent_values(run: dict[str, Any], key: str) -> list[list[float]]:
     """[cycle][agent] values of a per-agent cycle metric."""
     return [[c[key][a] for a in run["agents"] if a in c[key]] for c in run["cycles"]]
@@ -400,8 +431,10 @@ def analyze(runs_root: Path, out: Path) -> Path:
             "Runs: " + ", ".join(r["name"] for r in runs),
             "Values are mean ± SD across agents (pair: 2 agents × replicates; "
             "solo: 1 agent × replicates).",
-            "## EvalPlus Pass@1 (%)",
+            "## EvalPlus Pass@1 (%), whole agent (specialists + coordinator)",
             evalplus_table(groups),
+            "## Single models under the official EvalPlus protocol (%)",
+            plain_table(groups),
             "## Validation Pass@1 (%) by cycle",
             validation_table(groups),
             "## Learning during training",

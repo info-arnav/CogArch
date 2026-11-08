@@ -159,6 +159,24 @@ class Experiment:
             scores.append(score)
         return scores
 
+    async def _plain(self, model: str, label: str) -> dict[str, dict[str, float]]:
+        scores = {}
+        for benchmark in self.cfg.evaluation.benchmarks:
+            self.console.print(
+                f"  EvalPlus {benchmark} · {label} alone (official protocol)"
+            )
+            scores[benchmark] = await evalplus_eval.evaluate_plain(
+                self.client,
+                model,
+                benchmark,
+                self.run_dir
+                / "evalplus"
+                / "plain"
+                / f"{benchmark}_{label.replace('/', '_')}.jsonl",
+                self.cfg.model.max_tokens,
+            )
+        return scores
+
     # ── waking: competition ──────────────────────────────────────────────────
 
     async def _compete(
@@ -320,6 +338,10 @@ class Experiment:
         best, _, _ = await self._validate(validation)
         report.baseline_validation = dict(best)
         report.baseline_eval = await self._evalplus("baseline")
+        if self.cfg.evaluation.plain and self.cfg.evaluation.benchmarks:
+            report.baseline_plain = await self._plain(
+                self.cfg.model.served_name, "base"
+            )
         self._save(report)
 
         rounds_per_cycle = self.cfg.experiment.rounds_per_cycle
@@ -360,6 +382,13 @@ class Experiment:
 
         self.console.print("[bold green]Final evaluation[/bold green]")
         report.final_eval = await self._evalplus("final")
+        if self.cfg.evaluation.plain and self.cfg.evaluation.benchmarks:
+            for name, agent in self.agents.items():
+                for role, spec in agent.specialists.items():
+                    if spec.model != self.cfg.model.served_name:
+                        report.final_plain[f"{name}/{role}"] = await self._plain(
+                            spec.model, f"{name}/{role}"
+                        )
         self._save(report)
         await self.client.aclose()
         return report

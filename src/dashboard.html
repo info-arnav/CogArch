@@ -149,6 +149,16 @@ async function runPage(name) {
   const d = await api(`/api/run?name=${enc(name)}`), r = d.report, o = d.overview, agents = o.agents;
   let h = `<div class="crumbs"><a href="#/">Overview</a> › ${esc(name)}</div><h1>${esc(name)} <span class="tag">${o.condition}</span></h1>
     <p class="sub">${esc(o.model)} · ${esc(o.stage)}${o.rounds_done != null ? ` · ${o.rounds_done}/${o.rounds_total} problems` : ""}</p>`;
+  const plainRows = [];
+  for (const [bench, sc] of Object.entries(r.baseline_plain || {})) for (const kind of ["base", "plus"]) {
+    const label = { humaneval: ["HumanEval", "HumanEval+"], mbpp: ["MBPP", "MBPP+"] }[bench][kind === "base" ? 0 : 1];
+    plainRows.push(`<tr><td>${label}</td><td>base model</td><td class="num">${pct1(sc[kind])}</td><td></td></tr>`);
+    for (const [who, s2] of Object.entries(r.final_plain || {})) {
+      const v = s2[bench]?.[kind];
+      plainRows.push(`<tr><td>${label}</td><td>fine-tuned ${esc(who)}</td><td class="num">${pct1(v)}</td><td class="num">${v == null ? "" : ((v - sc[kind]) * 100 >= 0 ? "+" : "") + ((v - sc[kind]) * 100).toFixed(1) + " pp"}</td></tr>`);
+    }
+  }
+  if (plainRows.length) h += `<section class="panel"><h2>Single models, official EvalPlus protocol</h2><table><tr><th>Benchmark</th><th>Model</th><th>Pass@1</th><th>vs base</th></tr>${plainRows.join("")}</table></section>`;
   h += `<section class="panel"><h2>Cycles</h2><table><tr><th>Cycle</th><th>Problems</th>${agents.map(a => `<th>Agent ${a}: solved · from partner · validation</th>`).join("")}<th>Differ (code / verdict)</th><th>Rolled back</th></tr>
     <tr><td>0</td><td></td>${agents.map(a => `<td class="num">validation ${pct1(r.baseline_validation[a])}</td>`).join("")}<td></td><td></td></tr>`;
   for (const c of r.cycles) h += `<tr><td>${c.cycle}</td><td><a href="#/run/${enc(name)}/c/${c.cycle}">browse ${c.rounds}</a></td>${agents.map(a => `<td class="num">${pct(c.solved_rate[a])} · ${c.learned_from_peer[a] ?? 0} · ${pct1(c.validation_pass_at_1[a])}</td>`).join("")}<td class="num">${pct(c.code_divergence)} / ${pct(c.outcome_disagreement)}</td><td>${c.rolled_back.join(", ") || "–"}</td></tr>`;

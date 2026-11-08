@@ -65,6 +65,29 @@ class InferenceClient:
         response.raise_for_status()
         return str(response.json()["choices"][0]["message"]["content"] or "")
 
+    async def complete_after(
+        self,
+        messages: list[Message],
+        prefill: str,
+        model: str,
+        max_tokens: int,
+    ) -> str:
+        """Greedy continuation of an assistant message that starts with `prefill`
+        (vLLM's continue_final_message), as EvalPlus does for chat models."""
+        payload = {
+            "model": model,
+            "messages": [m.model_dump() for m in messages]
+            + [{"role": "assistant", "content": prefill}],
+            "temperature": 0.0,
+            "max_tokens": max_tokens,
+            "continue_final_message": True,
+            "add_generation_prompt": False,
+        }
+        async with self._slots:
+            response = await self._post_with_retry("/chat/completions", payload)
+        response.raise_for_status()
+        return str(response.json()["choices"][0]["message"]["content"] or "")
+
     async def _post_with_retry(self, path: str, payload: dict) -> httpx.Response:
         """POST, retrying dropped connections. Seeded requests are idempotent."""
         for attempt in range(TRANSPORT_RETRIES):

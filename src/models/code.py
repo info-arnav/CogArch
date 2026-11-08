@@ -178,5 +178,14 @@ class ExperimentReport(BaseModel):
     config: dict
     baseline_validation: dict[str, float] = Field(default_factory=dict)
     baseline_eval: list[EvalScore] = Field(default_factory=list)
+    baseline_plain: dict[str, dict[str, float]] = Field(
+        default_factory=dict,
+        description="Base model alone, EvalPlus protocol: benchmark -> {'base', 'plus'}",
+    )
     cycles: list[CycleMetrics] = Field(default_factory=list)
     final_eval: list[EvalScore] = Field(default_factory=list)
+    final_plain: dict[str, dict[str, dict[str, float]]] = Field(
+        default_factory=dict,
+        description="'agent/specialist' -> benchmark -> {'base', 'plus'}, each "
+        "fine-tuned specialist alone under the EvalPlus protocol",
+    )

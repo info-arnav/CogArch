@@ -99,6 +99,11 @@ class EvaluationConfig(BaseModel):
         default=5, ge=1, description="Pass@1 samples per EvalPlus task"
     )
     validation_samples: int = Field(default=3, ge=1)
+    plain: bool = Field(
+        default=True,
+        description="Also score the base model and each fine-tuned specialist alone "
+        "with the official EvalPlus protocol",
+    )
     benchmarks: list[str] = Field(
         default_factory=lambda: ["humaneval", "mbpp"],
         description="EvalPlus datasets, scored at the start and end of a run ([] to skip)",
