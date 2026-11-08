@@ -16,6 +16,10 @@ class CodeProblem(BaseModel):
 
     task_id: str
     prompt: str = Field(description="Task text shown to agents")
+    prompt_is_code: bool = Field(
+        default=False,
+        description="The prompt is a function stub (HumanEval/MBPP+ style)",
+    )
     entry_point: str
     tests: list[str] = Field(description="Assert statements run by the environment")
     setup_code: str = ""
@@ -48,10 +52,25 @@ class Message(BaseModel):
     content: str
 
 
+class LLMCall(BaseModel):
+    """One request to a part of an agent's brain, exactly as sent and answered."""
+
+    role: str = Field(description="Specialist name or 'coordinator'")
+    model: str = Field(description="Served model: base model or a LoRA adapter")
+    messages: list[Message]
+    response: str
+    temperature: float
+    seed: int
+
+
 class Decision(BaseModel):
     """One attempt: the specialists propose, the coordinator decides, the world judges."""
 
     attempt_number: int
+    calls: list[LLMCall] = Field(
+        default_factory=list,
+        description="Every specialist call and the coordinator call, with memory, as sent",
+    )
     proposals: list[Proposal]
     coordinator_prompt: list[Message] = Field(
         description="The coordinator's prompt without memory (the DPO training prompt)"
@@ -103,6 +122,7 @@ class RoundResult(BaseModel):
     probes: dict[str, list[str]] = Field(
         default_factory=dict, description="agent -> example calls it wrote itself"
     )
+    probe_calls: dict[str, LLMCall] = Field(default_factory=dict)
     agreement: dict[str, dict[str, bool]] = Field(
         default_factory=dict,
         description="agent -> proposal key -> behaves like the known solution",
@@ -122,7 +142,7 @@ class PreferencePair(BaseModel):
 
 
 class EvalScore(BaseModel):
-    """EvalPlus Pass@1 for one agent: benchmark -> {'base': x, 'plus': y}."""
+    """EvalPlus Pass@1 for one agent (averaged over samples): benchmark -> {'base', 'plus'}."""
 
     agent: str
     scores: dict[str, dict[str, float]] = Field(default_factory=dict)
@@ -141,7 +161,14 @@ class CycleMetrics(BaseModel):
     coordinator_choices: dict[str, dict[str, int]] = Field(default_factory=dict)
     validation_pass_at_1: dict[str, float] = Field(default_factory=dict)
     rolled_back: list[str] = Field(default_factory=list)
-    lessons: dict[str, list[str]] = Field(default_factory=dict)
+    lessons: dict[str, list[str]] = Field(
+        default_factory=dict, description="agent -> lessons held after this sleep"
+    )
+    reflections: dict[str, LLMCall] = Field(default_factory=dict)
+    training: dict[str, dict[str, dict]] = Field(
+        default_factory=dict,
+        description="agent -> role -> {pairs, steps, final loss/accuracy/margin}",
+    )
     code_divergence: float | None = None
     outcome_disagreement: float | None = None
 

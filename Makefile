@@ -1,4 +1,4 @@
-.PHONY: help install-dev test lint format clean serve smoke pilot dashboard
+.PHONY: help install-dev test lint format clean serve smoke pilot dashboard tunnel calibrate
 
 help:
 	@echo "Local:"
@@ -13,7 +13,9 @@ help:
 	@echo "  make smoke         Check vLLM, sandbox, DPO training, LoRA loading, throughput"
 	@echo "  make pilot         Launch the pilot runs in the background"
 	@echo "  make dashboard     Live dashboard on the server's localhost:8080"
-	@echo "                    (view: ssh -L 8080:localhost:8080 root@<server>)"
+	@echo "  make tunnel        Public https link to the dashboard (Cloudflare)"
+	@echo "  make calibrate     Compare candidate models before the experiment"
+	@echo "Laptop: scripts/sync_to_laptop.sh root@<server>   (keeps a copy of all runs)"
 
 install-dev:
 	pip install -e ".[dev]"
@@ -47,3 +49,9 @@ pilot:
 
 dashboard:
 	docker exec -d -w $(CURDIR) cogarch-exp sh -c "python -m cli.main dashboard > /tmp/dashboard.log 2>&1"
+
+tunnel:
+	scripts/tunnel.sh
+
+calibrate:
+	scripts/calibrate.sh Qwen/Qwen2.5-Coder-1.5B-Instruct Qwen/Qwen2.5-Coder-3B-Instruct Qwen/Qwen2.5-Coder-7B-Instruct

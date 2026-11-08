@@ -7,192 +7,253 @@
 <style>
   :root {
     color-scheme: light;
-    --surface-0: #f4f4f2; --surface-1: #fcfcfb; --border: #e3e2de;
+    --surface-0: #f4f4f2; --surface-1: #fcfcfb; --surface-2: #f0efec; --border: #e3e2de;
     --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #8a8984;
-    --grid: #ecebe7; --pair: #2a78d6; --solo: #eb6834;
-    --good: #008300; --warn: #b86e00;
+    --grid: #ecebe7; --pair: #2a78d6; --solo: #eb6834; --link: #1d63b8;
+    --good: #006d00; --bad: #c03030;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       color-scheme: dark;
-      --surface-0: #121211; --surface-1: #1a1a19; --border: #2d2d2b;
+      --surface-0: #121211; --surface-1: #1a1a19; --surface-2: #232321; --border: #2d2d2b;
       --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
-      --grid: #2a2a28; --pair: #3987e5; --solo: #d95926;
-      --good: #3fae3f; --warn: #e0a030;
+      --grid: #2a2a28; --pair: #3987e5; --solo: #d95926; --link: #6aa8f0;
+      --good: #4cc04c; --bad: #ef6b6b;
     }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--surface-0); color: var(--text-primary);
          font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { max-width: 1180px; margin: 0 auto; padding: 24px 16px 48px; }
-  h1 { font-size: 20px; margin: 0 0 2px; }
-  h2 { font-size: 15px; margin: 0 0 12px; }
-  .sub { color: var(--text-secondary); margin: 0 0 20px; }
-  .panel { background: var(--surface-1); border: 1px solid var(--border);
-           border-radius: 10px; padding: 16px; margin-bottom: 16px; }
-  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+  main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 48px; }
+  a { color: var(--link); text-decoration: none; } a:hover { text-decoration: underline; }
+  h1 { font-size: 20px; margin: 0 0 2px; } h2 { font-size: 15px; margin: 0 0 10px; }
+  h3 { font-size: 14px; margin: 14px 0 6px; }
+  .sub { color: var(--text-secondary); margin: 0 0 16px; }
+  .crumbs { color: var(--text-secondary); margin-bottom: 12px; font-size: 13px; }
+  .panel { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+           padding: 16px; margin-bottom: 16px; overflow-x: auto; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); }
   .legend { display: flex; gap: 16px; color: var(--text-secondary); font-size: 13px; margin-bottom: 8px; }
-  .swatch { display: inline-block; width: 12px; height: 3px; border-radius: 2px;
-            vertical-align: middle; margin-right: 6px; }
+  .swatch { display: inline-block; width: 12px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
   svg text { fill: var(--text-muted); font-size: 11px; }
-  .tooltip { position: fixed; pointer-events: none; background: var(--surface-1);
-             border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
-             font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.15); display: none; }
+  .tooltip { position: fixed; pointer-events: none; background: var(--surface-1); border: 1px solid var(--border);
+             border-radius: 6px; padding: 6px 8px; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.15); display: none; z-index: 9; }
   .bar { height: 6px; background: var(--grid); border-radius: 3px; overflow: hidden; margin: 4px 0 10px; }
   .bar > div { height: 100%; background: var(--text-secondary); border-radius: 3px; }
-  .tag { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 10px;
-         border: 1px solid var(--border); color: var(--text-secondary); }
+  .tag { display: inline-block; font-size: 12px; padding: 0 8px; border-radius: 10px; border: 1px solid var(--border);
+         color: var(--text-secondary); font-weight: normal; }
+  .ok { color: var(--good); } .no { color: var(--bad); }
   table { border-collapse: collapse; width: 100%; font-size: 13px; }
-  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--grid); }
-  th { color: var(--text-secondary); font-weight: 600; }
-  td.num { font-variant-numeric: tabular-nums; }
-  details { margin-top: 8px; color: var(--text-secondary); }
-  summary { cursor: pointer; }
-  pre { white-space: pre-wrap; font-size: 11px; color: var(--text-secondary);
-        background: var(--surface-0); padding: 8px; border-radius: 6px; max-height: 180px; overflow: auto; }
-  ul { margin: 4px 0; padding-left: 18px; }
+  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+  th { color: var(--text-secondary); font-weight: 600; white-space: nowrap; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  details { margin: 4px 0; } summary { cursor: pointer; color: var(--text-secondary); }
+  pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; background: var(--surface-2);
+        padding: 8px; border-radius: 6px; max-height: 420px; overflow: auto; margin: 4px 0; }
+  .msg { border-left: 3px solid var(--border); padding-left: 8px; margin: 6px 0; }
+  .role { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
   .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 13px; }
-  .kv span:nth-child(odd) { color: var(--text-secondary); }
+  .kv > span:nth-child(odd) { color: var(--text-secondary); }
+  .attempt { border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin: 8px 0; }
+  ul { margin: 4px 0; padding-left: 18px; }
 </style>
 </head>
 <body>
-<main>
-  <h1>CogArch Live</h1>
-  <p class="sub">Two agents teaching each other vs one agent alone · refreshes every 15s · <span id="updated">loading…</span></p>
-
-  <section class="panel">
-    <h2>Validation Pass@1 by cycle (cycle 0 = untrained)</h2>
-    <div class="legend">
-      <span><span class="swatch" style="background:var(--pair)"></span>Pair (each line = one agent)</span>
-      <span><span class="swatch" style="background:var(--solo)"></span>Solo</span>
-    </div>
-    <svg id="chart" width="100%" height="260" role="img" aria-label="Validation pass rate by cycle"></svg>
-    <details><summary>Table view</summary><div id="chart-table"></div></details>
-  </section>
-
-  <section class="panel">
-    <h2>EvalPlus Pass@1 (start → end)</h2>
-    <div id="evalplus"></div>
-  </section>
-
-  <div class="grid" id="runs"></div>
-</main>
+<main id="app">Loading…</main>
 <div class="tooltip" id="tip"></div>
-
 <script>
 const $ = (id) => document.getElementById(id);
 const pct = (x) => x == null ? "–" : (100 * x).toFixed(0) + "%";
-const esc = (s) => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const pct1 = (x) => x == null ? "–" : (100 * x).toFixed(1) + "%";
+const num = (x, d = 3) => x == null ? "–" : Number(x).toFixed(d);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const enc = encodeURIComponent;
+const api = async (path) => { const r = await fetch(path); if (!r.ok) throw new Error(path); return r.json(); };
+const mark = (ok) => ok ? `<span class="ok">✓</span>` : `<span class="no">✗</span>`;
+let timer = null;
 
-function series(runs) {
-  const out = [];
+// ── overview ────────────────────────────────────────────────────────────────
+function chart(runs) {
+  const data = [];
   for (const run of runs) for (const agent of run.agents) {
-    const points = [{ cycle: 0, value: run.baseline_validation[agent] }];
-    for (const c of run.cycles) points.push({ cycle: c.cycle, value: c.validation_pass_at_1[agent] });
-    out.push({ label: `${run.name} · agent ${agent}`, condition: run.condition,
-               points: points.filter(p => p.value != null), total: run.cycles_total });
+    const pts = [{ c: 0, v: run.baseline_validation[agent] }];
+    for (const c of run.cycles) pts.push({ c: c.cycle, v: c.validation_pass_at_1[agent] });
+    data.push({ label: `${run.name} · ${agent}`, cond: run.condition, pts: pts.filter(p => p.v != null) });
   }
-  return out;
-}
-
-function drawChart(runs) {
-  const svg = $("chart"), data = series(runs);
-  const W = svg.clientWidth || 800, H = 260, m = { l: 40, r: 16, t: 10, b: 28 };
-  const maxCycle = Math.max(1, ...runs.map(r => r.cycles_total));
-  const values = data.flatMap(s => s.points.map(p => p.value));
-  const lo = Math.max(0, Math.floor((Math.min(...values, 1) - 0.05) * 10) / 10);
-  const hi = Math.min(1, Math.ceil((Math.max(...values, 0) + 0.05) * 10) / 10);
-  const x = c => m.l + (W - m.l - m.r) * c / maxCycle;
-  const y = v => m.t + (H - m.t - m.b) * (1 - (v - lo) / Math.max(hi - lo, 0.1));
+  const W = Math.max(600, $("app").clientWidth - 70), H = 240, m = { l: 40, r: 12, t: 8, b: 24 };
+  const maxC = Math.max(1, ...runs.map(r => r.cycles_total));
+  const vals = data.flatMap(s => s.pts.map(p => p.v));
+  const lo = Math.max(0, Math.floor((Math.min(...vals, 1) - .05) * 10) / 10);
+  const hi = Math.min(1, Math.ceil((Math.max(...vals, 0) + .05) * 10) / 10);
+  const x = c => m.l + (W - m.l - m.r) * c / maxC, y = v => m.t + (H - m.t - m.b) * (1 - (v - lo) / Math.max(hi - lo, .1));
   let g = "";
-  for (let v = lo; v <= hi + 1e-9; v += 0.1) {
-    g += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)"/>`;
-    g += `<text x="${m.l - 6}" y="${y(v) + 4}" text-anchor="end">${pct(v)}</text>`;
-  }
-  for (let c = 0; c <= maxCycle; c++) g += `<text x="${x(c)}" y="${H - 8}" text-anchor="middle">${c}</text>`;
+  for (let v = lo; v <= hi + 1e-9; v += .1) g += `<line x1="${m.l}" x2="${W-m.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)"/><text x="${m.l-6}" y="${y(v)+4}" text-anchor="end">${pct(v)}</text>`;
+  for (let c = 0; c <= maxC; c++) g += `<text x="${x(c)}" y="${H-6}" text-anchor="middle">${c}</text>`;
   for (const s of data) {
-    const color = `var(--${s.condition})`;
-    const d = s.points.map((p, i) => `${i ? "L" : "M"}${x(p.cycle)},${y(p.value)}`).join("");
-    g += `<path d="${d}" fill="none" stroke="${color}" stroke-width="2"/>`;
-    for (const p of s.points) {
-      g += `<circle cx="${x(p.cycle)}" cy="${y(p.value)}" r="4" fill="${color}" stroke="var(--surface-1)" stroke-width="2"/>`;
-      g += `<circle cx="${x(p.cycle)}" cy="${y(p.value)}" r="12" fill="transparent" data-tip="${esc(s.label)}<br>cycle ${p.cycle}: <b>${pct(p.value)}</b>"/>`;
-    }
+    const col = `var(--${s.cond})`;
+    g += `<path d="${s.pts.map((p, i) => `${i ? "L" : "M"}${x(p.c)},${y(p.v)}`).join("")}" fill="none" stroke="${col}" stroke-width="2"/>`;
+    for (const p of s.pts) g += `<circle cx="${x(p.c)}" cy="${y(p.v)}" r="4" fill="${col}" stroke="var(--surface-1)" stroke-width="2"/><circle cx="${x(p.c)}" cy="${y(p.v)}" r="12" fill="transparent" data-tip="${esc(s.label)}<br>cycle ${p.c}: <b>${pct1(p.v)}</b>"/>`;
   }
-  svg.innerHTML = g;
-  const rows = data.map(s => `<tr><td>${esc(s.label)}</td>${s.points.map(p => `<td class="num">c${p.cycle}: ${pct(p.value)}</td>`).join("")}</tr>`).join("");
-  $("chart-table").innerHTML = `<table>${rows}</table>`;
+  return `<svg width="${W}" height="${H}" role="img" aria-label="Validation pass rate by cycle">${g}</svg>`;
 }
 
-function drawEvalplus(runs) {
+function evalplusTable(runs) {
   const rows = [];
   for (const run of runs) for (const agent of run.agents) {
-    const base = run.baseline_eval.find(e => e.agent === agent)?.scores || {};
-    const fin = run.final_eval.find(e => e.agent === agent)?.scores || {};
-    for (const bench of Object.keys(base)) for (const kind of ["base", "plus"]) {
-      const name = bench === "humaneval" ? (kind === "base" ? "HumanEval" : "HumanEval+")
-                                         : (kind === "base" ? "MBPP" : "MBPP+");
-      const a = base[bench]?.[kind], b = fin[bench]?.[kind];
-      const delta = b == null ? "" : ((b - a) * 100 >= 0 ? "+" : "") + ((b - a) * 100).toFixed(1) + " pp";
-      rows.push(`<tr><td>${esc(run.name)}</td><td>${agent}</td><td>${name}</td><td class="num">${pct(a)}</td><td class="num">${pct(b)}</td><td class="num">${delta}</td></tr>`);
+    const b = run.baseline_eval.find(e => e.agent === agent)?.scores || {}, f = run.final_eval.find(e => e.agent === agent)?.scores || {};
+    for (const bench of Object.keys(b)) for (const kind of ["base", "plus"]) {
+      const label = { humaneval: ["HumanEval", "HumanEval+"], mbpp: ["MBPP", "MBPP+"] }[bench][kind === "base" ? 0 : 1];
+      const s = b[bench]?.[kind], e = f[bench]?.[kind];
+      rows.push(`<tr><td><a href="#/run/${enc(run.name)}">${esc(run.name)}</a></td><td>${agent}</td><td>${label}</td><td class="num">${pct1(s)}</td><td class="num">${pct1(e)}</td><td class="num">${e == null ? "" : ((e - s) * 100 >= 0 ? "+" : "") + ((e - s) * 100).toFixed(1) + " pp"}</td></tr>`);
     }
   }
-  $("evalplus").innerHTML = rows.length
-    ? `<table><tr><th>Run</th><th>Agent</th><th>Benchmark</th><th>Start</th><th>End</th><th>Change</th></tr>${rows.join("")}</table>`
-    : `<p class="sub">Appears after each run's baseline evaluation.</p>`;
+  return rows.length ? `<table><tr><th>Run</th><th>Agent</th><th>Benchmark</th><th>Start</th><th>End</th><th>Change</th></tr>${rows.join("")}</table>` : `<p class="sub">Appears after each run's baseline evaluation.</p>`;
 }
 
 function runCard(run) {
   const last = run.cycles[run.cycles.length - 1];
-  const progress = run.stage === "finished" ? 1
-    : (run.cycles_done + (run.rounds_done || 0) / run.rounds_total) / run.cycles_total;
+  const prog = run.stage === "finished" ? 1 : (run.cycles_done + (run.rounds_done || 0) / run.rounds_total) / run.cycles_total;
   const kv = (k, v) => `<span>${k}</span><span>${v}</span>`;
-  let body = `<div class="kv">`;
-  body += kv("Stage", `${esc(run.stage)}${run.rounds_done != null ? ` · ${run.rounds_done}/${run.rounds_total} problems` : ""}`);
+  let b = `<div class="kv">` + kv("Stage", esc(run.stage) + (run.rounds_done != null ? ` · ${run.rounds_done}/${run.rounds_total} problems` : "")) + kv("Model", esc(run.model));
   if (last) {
-    body += kv("Solved (last cycle)", run.agents.map(a => `${a}: ${pct(last.solved_rate[a])}`).join(" · "));
+    b += kv("Solved (last cycle)", run.agents.map(a => `${a}: ${pct(last.solved_rate[a])}`).join(" · "));
     if (run.condition === "pair") {
-      body += kv("Learned from partner", run.agents.map(a => `${a}: ${last.learned_from_peer[a] ?? 0}`).join(" · "));
-      body += kv("Answers differ", `${pct(last.code_divergence)} code · ${pct(last.outcome_disagreement)} outcome`);
+      b += kv("Learned from partner", run.agents.map(a => `${a}: ${last.learned_from_peer[a] ?? 0}`).join(" · "));
+      b += kv("Answers differ", `${pct(last.code_divergence)} code · ${pct(last.outcome_disagreement)} verdict`);
     }
-    body += kv("Training pairs", run.agents.map(a =>
-      `${a}: ${Object.values(last.preference_pairs[a] || {}).reduce((x, y) => x + y, 0)}`).join(" · "));
-    body += kv("Coordinator relies on", run.agents.map(a => {
-      const ch = last.coordinator_choices[a] || {};
-      const top = Object.entries(ch).sort((p, q) => q[1] - p[1])[0];
-      return `${a}: ${top ? esc(top[0]) : "–"}`;
-    }).join(" · "));
-    if (last.rolled_back.length) body += kv("Rolled back", last.rolled_back.join(", "));
+    b += kv("Validation", run.agents.map(a => `${a}: ${pct1(last.validation_pass_at_1[a])}`).join(" · "));
   }
-  body += `</div>`;
-  if (last && Object.keys(last.lessons).length) {
-    body += `<details><summary>Sleep lessons (cycle ${last.cycle})</summary>` +
-      Object.entries(last.lessons).map(([a, ls]) =>
-        `<b>Agent ${a}</b><ul>${ls.map(l => `<li>${esc(l)}</li>`).join("")}</ul>`).join("") + `</details>`;
-  }
-  body += `<details><summary>Log</summary><pre>${esc(run.log.join("\n"))}</pre></details>`;
-  return `<section class="panel"><h2>${esc(run.name)} <span class="tag">${run.condition}</span></h2>
-    <div class="bar"><div style="width:${(100 * progress).toFixed(0)}%"></div></div>${body}</section>`;
+  b += `</div><details><summary>Log</summary><pre>${esc(run.log.join("\n"))}</pre></details>`;
+  return `<section class="panel"><h2><a href="#/run/${enc(run.name)}">${esc(run.name)}</a> <span class="tag">${run.condition}</span></h2><div class="bar"><div style="width:${(100 * prog).toFixed(0)}%"></div></div>${b}</section>`;
 }
 
-async function refresh() {
+async function overview() {
+  const runs = await api("/api/runs");
+  $("app").innerHTML = `<h1>CogArch Live</h1><p class="sub">Two agents teaching each other vs one agent alone · refreshes every 15s · ${new Date().toLocaleTimeString()}</p>
+    <section class="panel"><h2>Validation Pass@1 by cycle (cycle 0 = untrained)</h2>
+      <div class="legend"><span><span class="swatch" style="background:var(--pair)"></span>Pair (one line per agent)</span><span><span class="swatch" style="background:var(--solo)"></span>Solo</span></div>
+      ${runs.length ? chart(runs) : `<p class="sub">No runs yet.</p>`}</section>
+    <section class="panel"><h2>EvalPlus Pass@1 (start → end)</h2>${evalplusTable(runs)}</section>
+    <div class="grid">${runs.map(runCard).join("")}</div>`;
+  timer = setTimeout(route, 15000);
+}
+
+// ── one run ─────────────────────────────────────────────────────────────────
+function callView(call, open = false) {
+  const msgs = call.messages.map(m => `<div class="msg"><div class="role">${esc(m.role)}</div><pre>${esc(m.content)}</pre></div>`).join("");
+  return `<details${open ? " open" : ""}><summary><b>${esc(call.role)}</b> · ${esc(call.model)} · T=${call.temperature} · seed ${call.seed}</summary>
+    ${msgs}<div class="msg"><div class="role">response</div><pre>${esc(call.response)}</pre></div></details>`;
+}
+
+async function runPage(name) {
+  const d = await api(`/api/run?name=${enc(name)}`), r = d.report, o = d.overview, agents = o.agents;
+  let h = `<div class="crumbs"><a href="#/">Overview</a> › ${esc(name)}</div><h1>${esc(name)} <span class="tag">${o.condition}</span></h1>
+    <p class="sub">${esc(o.model)} · ${esc(o.stage)}${o.rounds_done != null ? ` · ${o.rounds_done}/${o.rounds_total} problems` : ""}</p>`;
+  h += `<section class="panel"><h2>Cycles</h2><table><tr><th>Cycle</th><th>Problems</th>${agents.map(a => `<th>Agent ${a}: solved · from partner · validation</th>`).join("")}<th>Differ (code / verdict)</th><th>Rolled back</th></tr>
+    <tr><td>0</td><td></td>${agents.map(a => `<td class="num">validation ${pct1(r.baseline_validation[a])}</td>`).join("")}<td></td><td></td></tr>`;
+  for (const c of r.cycles) h += `<tr><td>${c.cycle}</td><td><a href="#/run/${enc(name)}/c/${c.cycle}">browse ${c.rounds}</a></td>${agents.map(a => `<td class="num">${pct(c.solved_rate[a])} · ${c.learned_from_peer[a] ?? 0} · ${pct1(c.validation_pass_at_1[a])}</td>`).join("")}<td class="num">${pct(c.code_divergence)} / ${pct(c.outcome_disagreement)}</td><td>${c.rolled_back.join(", ") || "–"}</td></tr>`;
+  const running = d.round_cycles.filter(c => c > r.cycles.length);
+  for (const c of running) h += `<tr><td>${c}</td><td><a href="#/run/${enc(name)}/c/${c}">browse (in progress)</a></td><td colspan="${agents.length + 2}"></td></tr>`;
+  h += `</table></section>`;
+
+  for (const c of [...r.cycles].reverse()) {
+    h += `<section class="panel"><h2>Cycle ${c.cycle} · sleep</h2>`;
+    h += `<h3>Training (DPO + NLL, per part of each brain)</h3><table><tr><th>Agent</th><th>Part</th><th>Pairs</th><th>Pairs from partner</th><th>Steps</th><th>Final loss</th><th>Reward accuracy</th><th>Reward margin</th><th></th></tr>`;
+    for (const a of agents) {
+      const pairs = c.preference_pairs[a] || {}, tr = (c.training || {})[a] || {};
+      for (const role of Object.keys(pairs)) {
+        const t = tr[role];
+        h += `<tr><td>${a}</td><td>${role}</td><td class="num">${pairs[role]}</td><td class="num">${role === Object.keys(pairs)[0] ? Object.entries(c.pair_sources[a] || {}).map(([s, n]) => `${s}: ${n}`).join(", ") : ""}</td>
+          <td class="num">${t ? t.steps : "not trained"}</td><td class="num">${t ? num(t.loss) : ""}</td><td class="num">${t ? pct(t.reward_accuracy) : ""}</td><td class="num">${t ? num(t.reward_margin) : ""}</td>
+          <td>${pairs[role] ? `<a href="#/run/${enc(name)}/pairs/${a}/${role}/${c.cycle}">pairs</a>` : ""}</td></tr>`;
+      }
+    }
+    h += `</table><h3>Lessons held after this sleep</h3>`;
+    for (const a of agents) {
+      h += `<b>Agent ${a}</b><ul>${(c.lessons[a] || []).map(l => `<li>${esc(l)}</li>`).join("") || "<li>–</li>"}</ul>`;
+      if ((c.reflections || {})[a]) h += callView(c.reflections[a]);
+    }
+    h += `<h3>Coordinator choices (first attempts)</h3>${agents.map(a => `${a}: ${Object.entries(c.coordinator_choices[a] || {}).map(([k, v]) => `${esc(k)} ${v}`).join(" · ")}`).join("<br>")}</section>`;
+  }
+  h += `<section class="panel"><h2>Log</h2><pre>${esc(d.log.join("\n"))}</pre></section>`;
+  $("app").innerHTML = h;
+  if (o.stage !== "finished") timer = setTimeout(route, 30000);
+}
+
+async function roundsPage(name, cycle) {
+  const rows = await api(`/api/rounds?name=${enc(name)}&cycle=${cycle}`);
+  const agents = rows.length ? Object.keys(rows[0].agents) : [];
+  let h = `<div class="crumbs"><a href="#/">Overview</a> › <a href="#/run/${enc(name)}">${esc(name)}</a> › cycle ${cycle}</div><h1>Cycle ${cycle}: ${rows.length} problems</h1>
+    <section class="panel"><table><tr><th>#</th><th>Problem</th>${agents.map(a => `<th>Agent ${a}</th>`).join("")}</tr>`;
+  for (const r of rows) h += `<tr><td>${r.i + 1}</td><td><a href="#/run/${enc(name)}/c/${cycle}/r/${r.i}">${esc(r.task_id)}</a> <span class="tag">${esc(r.entry_point)}</span></td>${agents.map(a => {
+    const s = r.agents[a];
+    return `<td>${mark(s.solved)} ${s.attempts} attempt${s.attempts > 1 ? "s" : ""} · chose ${s.choices.map(c => esc(c ?? "none")).join(" → ")}${s.learned_from && s.learned_from !== a ? ` · <b>learned from ${esc(s.learned_from)}</b>` : ""}</td>`;
+  }).join("")}</tr>`;
+  $("app").innerHTML = h + `</table></section>`;
+  timer = setTimeout(route, 30000);
+}
+
+async function roundPage(name, cycle, i) {
+  const r = await api(`/api/round?name=${enc(name)}&cycle=${cycle}&i=${i}`);
+  let h = `<div class="crumbs"><a href="#/">Overview</a> › <a href="#/run/${enc(name)}">${esc(name)}</a> › <a href="#/run/${enc(name)}/c/${cycle}">cycle ${cycle}</a> › ${esc(r.problem.task_id)}
+    · <a href="#/run/${enc(name)}/c/${cycle}/r/${Math.max(0, i - 1)}">‹ prev</a> · <a href="#/run/${enc(name)}/c/${cycle}/r/${i + 1}">next ›</a></div>
+    <h1>${esc(r.problem.task_id)}</h1>
+    <section class="panel"><h2>Problem (what agents see)</h2><pre>${esc(r.problem.prompt)}</pre>
+    <details><summary>Hidden tests (held by the environment, never shown to agents)</summary><pre>${esc([r.problem.setup_code, ...r.problem.tests].filter(Boolean).join("\n"))}</pre></details></section>`;
+  for (const [agent, res] of Object.entries(r.results)) {
+    const known = r.known_solution[agent];
+    h += `<section class="panel"><h2>Agent ${esc(agent)} ${mark(res.decisions.some(d => d.result.passed))}</h2>`;
+    if (known) h += `<p>Knows an accepted solution, found by <b>${known.found_by === agent ? "itself" : "agent " + esc(known.found_by)}</b>.</p><details><summary>Accepted solution</summary><pre>${esc(known.code)}</pre></details>`;
+    for (const d of res.decisions) {
+      h += `<div class="attempt"><b>Attempt ${d.attempt_number}</b> — coordinator ${d.choice ? (d.choice === "combined" ? "combined proposals" : "chose <b>" + esc(d.choice) + "</b>") : "gave no valid decision"} —
+        world: ${d.result.passed ? `<span class="ok">accepted</span>` : `<span class="no">${esc(d.result.feedback)}</span>`}
+        <span class="tag">env: ${d.result.tests_passed}/${d.result.tests_total} tests${d.result.error_types.length ? " · " + esc(d.result.error_types.join(", ")) : ""}</span>
+        <details><summary>Submitted code</summary><pre>${esc(d.code)}</pre></details>
+        <h3>Calls to each part of the brain</h3>${(d.calls || []).map(c => {
+          const verdict = (r.agreement[agent] || {})[`${d.attempt_number}:${c.role}`];
+          return (verdict == null ? "" : `<div class="role">${verdict ? "behaves like the accepted solution" : "behaves differently from the accepted solution"}</div>`) + callView(c);
+        }).join("")}</div>`;
+    }
+    if (r.probe_calls && r.probe_calls[agent]) h += `<h3>Credit assignment: example calls the agent wrote</h3><pre>${esc((r.probes[agent] || []).join("\n") || "(none parsed)")}</pre>${callView(r.probe_calls[agent])}`;
+    h += `</section>`;
+  }
+  $("app").innerHTML = h;
+}
+
+async function pairsPage(name, agent, role, cycle) {
+  const pairs = await api(`/api/pairs?name=${enc(name)}&agent=${enc(agent)}&role=${enc(role)}&cycle=${cycle}`);
+  let h = `<div class="crumbs"><a href="#/">Overview</a> › <a href="#/run/${enc(name)}">${esc(name)}</a> › cycle ${cycle} › agent ${esc(agent)} · ${esc(role)}</div>
+    <h1>Training pairs: agent ${esc(agent)}, ${esc(role)}, cycle ${cycle}</h1><p class="sub">Each pair teaches: prefer "chosen" over "rejected" for this prompt. Showing up to 30.</p>`;
+  pairs.forEach((p, k) => {
+    h += `<section class="panel"><h2>Pair ${k + 1}</h2><details><summary>Prompt</summary>${p.prompt.map(m => `<div class="msg"><div class="role">${esc(m.role)}</div><pre>${esc(m.content)}</pre></div>`).join("")}</details>
+      <div class="msg"><div class="role ok">chosen</div><pre>${esc(p.chosen[0].content)}</pre></div><div class="msg"><div class="role no">rejected</div><pre>${esc(p.rejected[0].content)}</pre></div></section>`;
+  });
+  $("app").innerHTML = h;
+}
+
+// ── routing ─────────────────────────────────────────────────────────────────
+async function route() {
+  clearTimeout(timer);
+  const p = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
   try {
-    const runs = await (await fetch("/api/runs")).json();
-    drawChart(runs); drawEvalplus(runs);
-    $("runs").innerHTML = runs.map(runCard).join("") || `<p class="sub">No runs yet.</p>`;
-    $("updated").textContent = "updated " + new Date().toLocaleTimeString();
+    if (p[0] === "run" && p[2] === "c" && p[4] === "r") await roundPage(p[1], +p[3], +p[5]);
+    else if (p[0] === "run" && p[2] === "c") await roundsPage(p[1], +p[3]);
+    else if (p[0] === "run" && p[2] === "pairs") await pairsPage(p[1], p[3], p[4], +p[5]);
+    else if (p[0] === "run") await runPage(p[1]);
+    else await overview();
   } catch (e) {
-    $("updated").textContent = "server unreachable — retrying";
+    $("app").innerHTML = `<p class="sub">Not available yet (${esc(e.message)}). <a href="#/">Back to overview</a></p>`;
+    timer = setTimeout(route, 15000);
   }
 }
-
+window.addEventListener("hashchange", () => { window.scrollTo(0, 0); route(); });
 document.addEventListener("mousemove", (ev) => {
   const t = ev.target.closest?.("[data-tip]"), tip = $("tip");
   if (!t) { tip.style.display = "none"; return; }
   tip.innerHTML = t.dataset.tip; tip.style.display = "block";
   tip.style.left = (ev.clientX + 12) + "px"; tip.style.top = (ev.clientY + 12) + "px";
 });
-refresh(); setInterval(refresh, 15000);
+route();
 </script>
 </body>
 </html>

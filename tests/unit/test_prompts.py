@@ -7,8 +7,8 @@ from src.inference.prompts import (
     load_coordinator,
     load_specialist,
     parse_coordinator,
-    parse_lessons,
     parse_probes,
+    parse_reflection,
     specialist_messages,
 )
 from src.models.code import CodeProblem, Decision, ExecutionResult, Proposal
@@ -107,8 +107,24 @@ class TestParsing:
         )
         assert parse_probes(text, "add", 5) == ["add(3, 4)", "add(0, 0)"]
 
-    def test_parse_lessons(self):
+    def test_parse_reflection_operations(self):
         text = (
-            "Here:\n- Check empty input\n* Avoid recursion depth\n- Check empty input"
+            "ADD: Check for empty input before indexing\n"
+            "- AGREE 2\n"
+            "DISAGREE 7\n"
+            "EDIT 1: Off-by-one errors happen at range ends\n"
+            "random chatter"
         )
-        assert parse_lessons(text, 5) == ["Check empty input", "Avoid recursion depth"]
+        assert parse_reflection(text, existing=3) == [
+            ("add", None, "Check for empty input before indexing"),
+            ("agree", 2, ""),
+            ("edit", 1, "Off-by-one errors happen at range ends"),
+        ]
+
+    def test_task_text_uses_evalplus_instruction_and_fences_stubs(self):
+        stub = PROBLEM.model_copy(
+            update={"prompt": "def add(a, b):\n    pass", "prompt_is_code": True}
+        )
+        text = specialist_messages(load_specialist("logical"), stub)[-1].content
+        assert text.startswith("Please provide a self-contained Python script")
+        assert "```python\ndef add(a, b):" in text

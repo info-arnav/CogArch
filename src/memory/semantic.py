@@ -111,13 +111,30 @@ class SemanticStore:
             ).fetchall()
         return [self._row(r) for r in rows]
 
-    def recent(self, category: str, limit: int = 5) -> list[SemanticEntry]:
-        """Most recently added or reinforced entries in a category."""
-        rows = self._conn.execute(
-            "SELECT * FROM semantic WHERE category=? ORDER BY updated_at DESC LIMIT ?",
-            (category, limit),
-        ).fetchall()
-        return [self._row(r) for r in rows]
+    def adjust(self, entry_id: str, confidence_delta: float) -> None:
+        """Strengthen or weaken an entry; entries that reach zero are forgotten."""
+        row = self._conn.execute(
+            "SELECT confidence, evidence_count FROM semantic WHERE id=?", (entry_id,)
+        ).fetchone()
+        if row is None:
+            return
+        confidence = min(1.0, row[0] + confidence_delta)
+        if confidence <= 0.0:
+            self._conn.execute("DELETE FROM semantic WHERE id=?", (entry_id,))
+        else:
+            evidence = row[1] + (1 if confidence_delta > 0 else 0)
+            self._conn.execute(
+                "UPDATE semantic SET confidence=?, evidence_count=?, updated_at=? WHERE id=?",
+                (confidence, evidence, _now(), entry_id),
+            )
+        self._conn.commit()
+
+    def edit(self, entry_id: str, concept: str) -> None:
+        self._conn.execute(
+            "UPDATE semantic SET concept=?, updated_at=? WHERE id=?",
+            (concept, _now(), entry_id),
+        )
+        self._conn.commit()
 
     def get_all(self) -> list[SemanticEntry]:
         rows = self._conn.execute(

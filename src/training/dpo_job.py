@@ -31,6 +31,7 @@ class DPOJob(BaseModel):
     lora_dropout: float
     learning_rate: float
     beta: float
+    nll_weight: float
     epochs: int
     batch_size: int
     grad_accumulation: int
@@ -74,6 +75,10 @@ def run(job: DPOJob) -> None:
         gradient_accumulation_steps=job.grad_accumulation,
         learning_rate=job.learning_rate,
         beta=job.beta,
+        # DPO + NLL on the chosen response (Pang et al., 2024): keeps the
+        # likelihood of correct solutions from falling during preference training.
+        loss_type=["sigmoid", "sft"] if job.nll_weight > 0 else ["sigmoid"],
+        loss_weights=[1.0, job.nll_weight] if job.nll_weight > 0 else None,
         max_length=job.max_length,
         bf16=True,
         gradient_checkpointing=True,

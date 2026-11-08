@@ -31,7 +31,7 @@ graph TD
 | Coordinator | Prefrontal cortex | An LLM with its own adapter; reads all proposals and picks or combines them |
 | Feedback | Learning from the world | Only "Your solution is wrong." Never tests, expected outputs or answers |
 | Working / episodic / semantic memory | Short-term, hippocampus, cortex | Session buffer; embedded JSONL episodes; SQLite lessons |
-| Sleep | Consolidation | LLM reflection into lessons, then DPO fine-tuning of every specialist and the coordinator |
+| Sleep | Consolidation | ExpeL-style reflection (compare wrong answers with accepted solutions; ADD / AGREE / DISAGREE / EDIT lessons), then DPO + NLL fine-tuning of every specialist and the coordinator |
 | Two agents | Two people learning together | Different seeds, separate memories and weights; accepted solutions are shared |
 
 **Credit assignment.** The world judges only the coordinator's answer, so specialists whose proposals weren't submitted don't learn from the world directly. Once a solution is known, the agent writes its own example calls and checks which of its proposals behave the same way as the known solution. That decides each part's DPO pairs:
@@ -57,12 +57,19 @@ Tested target: 1× AMD MI300X (ROCm). vLLM and the experiment both run from AMD'
 ```bash
 scripts/setup_server.sh          # Docker, image, experiment container, datasets
 make serve                       # vLLM with runtime LoRA loading on :8000
+make dashboard && make tunnel    # live dashboard + public https link (Cloudflare)
 make smoke                       # checks every component, then a tiny end-to-end run
-make pilot                       # 2 configs × 2 replicates, in the background
-make dashboard                   # live dashboard on the server's localhost:8080
+make calibrate                   # compare 1.5B / 3B / 7B before choosing a model
+scripts/launch_pilot.sh 8 <model> # pair vs solo, 8 replicates each
 ```
 
-To view the dashboard from your machine: `ssh -L 8080:localhost:8080 root@<server>`, then open http://localhost:8080.
+On your laptop, keep a copy of everything while runs progress:
+`scripts/sync_to_laptop.sh root@<server>`.
+
+The dashboard drills down from runs → cycles → problems → attempts, showing every
+prompt and reply for each specialist and the coordinator, the environment's
+verdict, credit assignment, sleep lessons, and each part's DPO pairs and training
+statistics.
 
 Results land in `data/runs/<run>/`. Each run directory has:
 - `report.json`

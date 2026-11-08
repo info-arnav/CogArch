@@ -12,7 +12,7 @@ import asyncio
 
 from src.execution.sandbox import Sandbox, behaves_alike
 from src.inference.agent import Agent
-from src.models.code import AgentResult, CodeProblem, Discovery, RoundResult
+from src.models.code import AgentResult, CodeProblem, Discovery, LLMCall, RoundResult
 
 
 def proposal_key(attempt_number: int, specialist: str) -> str:
@@ -44,11 +44,11 @@ async def assign_credit(
     problem: CodeProblem,
     known: Discovery,
     sandbox: Sandbox,
-) -> tuple[list[str], dict[str, bool]]:
+) -> tuple[list[str], dict[str, bool], LLMCall]:
     """Which of the agent's proposals behave like the known solution."""
-    probes = await agent.write_probes(problem)
+    probes, call = await agent.write_probes(problem)
     if not probes:
-        return probes, {}
+        return probes, {}, call
     reference = await sandbox.run_probes(known.code, probes, problem.setup_code)
 
     keyed = [
@@ -64,7 +64,7 @@ async def assign_credit(
         verdict = True if code == known.code else behaves_alike(reference, out)
         if verdict is not None:
             agreement[key] = verdict
-    return probes, agreement
+    return probes, agreement, call
 
 
 def episode_text(round_result: RoundResult, agent: str) -> str:
@@ -109,8 +109,9 @@ async def play_round(
         problem=problem,
         results=results,
         known_solution=known,
-        probes={n: probes for n, (probes, _) in zip(with_known, credited)},
-        agreement={n: agreement for n, (_, agreement) in zip(with_known, credited)},
+        probes={n: probes for n, (probes, _, _) in zip(with_known, credited)},
+        agreement={n: agreement for n, (_, agreement, _) in zip(with_known, credited)},
+        probe_calls={n: call for n, (_, _, call) in zip(with_known, credited)},
     )
 
 

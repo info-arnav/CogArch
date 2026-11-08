@@ -73,3 +73,37 @@ async def test_seeds_differ_between_agents(add_problem):
     await agent_a.answer(add_problem)
     await agent_b.answer(add_problem)
     assert [c["seed"] for c in chat_a.calls] != [c["seed"] for c in chat_b.calls]
+
+
+async def test_every_call_is_logged_with_memory_and_order_is_shuffled(add_problem):
+    chat = ScriptedChat(team)
+    result = await make_agent(chat).solve(add_problem)
+    first = result.decisions[0]
+    assert [c.role for c in first.calls] == [
+        "logical",
+        "creative",
+        "skeptical",
+        "empathetic",
+        "coordinator",
+    ]
+    assert first.calls[-1].response == "CHOOSE: creative"
+    shown = [
+        line[4:]
+        for line in first.calls[-1].messages[-1].content.splitlines()
+        if line.startswith("### ")
+    ]
+    assert sorted(shown) == ["creative", "empathetic", "logical", "skeptical"]
+    orders = set()
+    for attempt in range(1, 6):
+        problem = add_problem.model_copy(update={"task_id": f"p{attempt}"})
+        decision = await make_agent(ScriptedChat(team))._attempt(
+            problem, 1, "", None, "x"
+        )
+        orders.add(
+            tuple(
+                line[4:]
+                for line in decision.calls[-1].messages[-1].content.splitlines()
+                if line.startswith("### ")
+            )
+        )
+    assert len(orders) > 1

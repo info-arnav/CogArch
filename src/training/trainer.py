@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 from src.config import TrainingConfig
 from src.models.code import PreferencePair
@@ -46,6 +48,7 @@ def make_job(
         lora_dropout=cfg.lora_dropout,
         learning_rate=cfg.learning_rate,
         beta=cfg.beta,
+        nll_weight=cfg.nll_weight,
         epochs=cfg.epochs,
         batch_size=cfg.batch_size,
         grad_accumulation=cfg.grad_accumulation,
@@ -57,16 +60,46 @@ class TrainingError(RuntimeError):
     pass
 
 
-async def run_jobs(jobs: dict[str, DPOJob], parallel: int) -> None:
-    """Run each job in its own process, at most `parallel` at a time."""
-    slots = asyncio.Semaphore(parallel)
+class TrainingSlot:
+    """One of N machine-wide training slots, held via an exclusive file lock.
+
+    Runs are separate processes sharing one GPU; the lock files make sure no
+    more than N DPO jobs train at once, whichever runs they belong to.
+    """
+
+    def __init__(self, slots_dir: Path, slots: int) -> None:
+        self.slots_dir = slots_dir
+        self.slots = slots
+        self._handle: Any = None
+
+    async def __aenter__(self) -> TrainingSlot:
+        self.slots_dir.mkdir(parents=True, exist_ok=True)
+        while True:
+            for i in range(self.slots):
+                handle = open(self.slots_dir / f"slot{i}.lock", "w")
+                try:
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    handle.close()
+                    continue
+                self._handle = handle
+                return self
+            await asyncio.sleep(2)
+
+    async def __aexit__(self, *exc: object) -> None:
+        fcntl.flock(self._handle, fcntl.LOCK_UN)
+        self._handle.close()
+
+
+async def run_jobs(jobs: dict[str, DPOJob], slots_dir: Path, slots: int) -> None:
+    """Run each job in its own process, within the machine-wide slot limit."""
 
     async def run_one(key: str, job: DPOJob) -> None:
         out = Path(job.output_dir)
         out.mkdir(parents=True, exist_ok=True)
         job_file = out / "job.json"
         job_file.write_text(job.model_dump_json(indent=2))
-        async with slots:
+        async with TrainingSlot(slots_dir, slots):
             with open(out / "train.log", "w") as log:
                 proc = await asyncio.create_subprocess_exec(
                     sys.executable,
@@ -84,3 +117,18 @@ async def run_jobs(jobs: dict[str, DPOJob], parallel: int) -> None:
             )
 
     await asyncio.gather(*(run_one(k, j) for k, j in jobs.items()))
+
+
+def training_summary(output_dir: Path, pairs: int) -> dict[str, Any]:
+    """Final DPO statistics from a finished job's log history."""
+    history = json.loads((output_dir / "train_metrics.json").read_text())
+    steps = [h for h in history if "loss" in h]
+    last = steps[-1] if steps else {}
+    return {
+        "pairs": pairs,
+        "steps": max((h.get("step", 0) for h in history), default=0),
+        "loss": last.get("loss"),
+        "reward_accuracy": last.get("rewards/accuracies"),
+        "reward_margin": last.get("rewards/margins"),
+        "log": steps,
+    }

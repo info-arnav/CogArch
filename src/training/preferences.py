@@ -1,21 +1,26 @@
 """DPO pairs from a cycle's rounds, per agent and per role.
 
-Specialists: the known solution is preferred over the specialist's own
-first-attempt proposal when that proposal behaves differently.
+Every attempt contributes, not only the first:
 
-Coordinator: for each decision, a reply that adopted a proposal behaving like
-the known solution is preferred over one that adopted a proposal that did not.
-When the coordinator's actual reply was accepted or rejected by the world, that
-reply is used directly.
+Specialists: for each attempt, a proposal that behaves differently from the
+known solution yields a pair (known solution preferred over that proposal),
+with the prompt the specialist actually saw at that attempt (minus memory),
+so retries also teach how to recover after being told "wrong".
+
+Coordinator: for each decision, adopting a proposal that behaves like the
+known solution is preferred over adopting one that does not. When the
+coordinator's actual reply was accepted or rejected by the world, that reply
+is used directly as the chosen or rejected side.
 """
 
 from __future__ import annotations
 
 from src.inference.prompts import Persona, coordinator_selection, specialist_messages
-from src.models.code import PreferencePair, RoundResult
+from src.models.code import Decision, PreferencePair, RoundResult
 from src.training.community import proposal_key
 
 COORDINATOR = "coordinator"
+MAX_COORDINATOR_PAIRS_PER_DECISION = 2
 
 
 def _code_reply(code: str) -> str:
@@ -34,58 +39,60 @@ def build_pairs(
         known = r.known_solution.get(agent)
         if known is None:
             continue
-        result = r.results[agent]
+        decisions = r.results[agent].decisions
         agreement = r.agreement.get(agent, {})
         source = "self" if known.found_by == agent else known.found_by
 
-        for proposal in result.decisions[0].proposals:
-            if agreement.get(proposal_key(1, proposal.specialist)) is False:
-                persona = specialists[proposal.specialist]
-                pairs[proposal.specialist].append(
-                    PreferencePair(
-                        problem_id=r.problem.task_id,
-                        agent=agent,
-                        role=proposal.specialist,
-                        prompt=specialist_messages(persona, r.problem),
-                        chosen=_code_reply(known.code),
-                        rejected=_code_reply(proposal.code),
-                        source=source,
-                    )
-                )
+        def verdict(decision: Decision, specialist: str) -> bool | None:
+            return agreement.get(proposal_key(decision.attempt_number, specialist))
 
-        for decision in result.decisions:
+        for index, decision in enumerate(decisions):
+            previous = decisions[index - 1] if index > 0 else None
+            for proposal in decision.proposals:
+                if verdict(decision, proposal.specialist) is False:
+                    persona = specialists[proposal.specialist]
+                    pairs[proposal.specialist].append(
+                        PreferencePair(
+                            problem_id=r.problem.task_id,
+                            agent=agent,
+                            role=proposal.specialist,
+                            prompt=specialist_messages(
+                                persona, r.problem, previous=previous
+                            ),
+                            chosen=_code_reply(known.code),
+                            rejected=_code_reply(proposal.code),
+                            source=source,
+                        )
+                    )
+
             good = [
-                p
-                for p in decision.proposals
-                if agreement.get(proposal_key(decision.attempt_number, p.specialist))
-                is True
+                p for p in decision.proposals if verdict(decision, p.specialist) is True
             ]
             bad = [
                 p
                 for p in decision.proposals
-                if agreement.get(proposal_key(decision.attempt_number, p.specialist))
-                is False
+                if verdict(decision, p.specialist) is False
             ]
-            if decision.result.passed and bad:
-                chosen, rejected = decision.coordinator_output, coordinator_selection(
-                    bad[0]
-                )
-            elif not decision.result.passed and good:
-                chosen, rejected = (
-                    coordinator_selection(good[0]),
-                    decision.coordinator_output,
-                )
+            if decision.result.passed:
+                options = [
+                    (decision.coordinator_output, coordinator_selection(p)) for p in bad
+                ]
+            elif good:
+                options = [
+                    (coordinator_selection(good[0]), decision.coordinator_output)
+                ]
             else:
-                continue
-            pairs[COORDINATOR].append(
-                PreferencePair(
-                    problem_id=r.problem.task_id,
-                    agent=agent,
-                    role=COORDINATOR,
-                    prompt=decision.coordinator_prompt,
-                    chosen=chosen,
-                    rejected=rejected,
-                    source=source,
+                options = []
+            for chosen, rejected in options[:MAX_COORDINATOR_PAIRS_PER_DECISION]:
+                pairs[COORDINATOR].append(
+                    PreferencePair(
+                        problem_id=r.problem.task_id,
+                        agent=agent,
+                        role=COORDINATOR,
+                        prompt=decision.coordinator_prompt,
+                        chosen=chosen,
+                        rejected=rejected,
+                        source=source,
+                    )
                 )
-            )
     return pairs

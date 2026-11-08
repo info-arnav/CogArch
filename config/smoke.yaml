@@ -30,15 +30,16 @@ training:
   enabled: true
   lora_rank: 16
   lora_alpha: 32
-  learning_rate: 5.0e-6
+  learning_rate: 2.0e-5     # LoRA; ~10-60 pairs per role per cycle
   beta: 0.1
-  epochs: 2
-  batch_size: 4
-  grad_accumulation: 2
+  nll_weight: 1.0           # DPO + NLL on chosen (Pang et al., 2024)
+  epochs: 3
+  batch_size: 2
+  grad_accumulation: 1
   max_length: 3072
-  min_pairs: 2
-  parallel_jobs: 5
-  rollback_threshold: 0.1   # validation noise is ~±0.07 on 50 problems
+  min_pairs: 1
+  global_slots: 4           # DPO jobs at once on the machine, across all runs
+  rollback_threshold: 0.1
 
 memory:
   enabled: true
@@ -51,6 +52,8 @@ memory:
   lessons_in_prompt: 5
 
 evaluation:
+  samples: 1                # Pass@1 averaged over samples per task
+  validation_samples: 1
   benchmarks: [humaneval]   # times one EvalPlus pass
 
 experiment:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import random
 from dataclasses import dataclass
 
 from src.execution.sandbox import Sandbox
@@ -19,14 +20,22 @@ from src.inference.prompts import (
     coordinator_messages,
     extract_code,
     parse_coordinator,
-    parse_lessons,
     parse_probes,
+    parse_reflection,
     probe_messages,
     reflection_messages,
     specialist_messages,
 )
 from src.memory.controller import AgentMemory
-from src.models.code import AgentResult, CodeProblem, Decision, Message, Proposal
+from src.models.code import (
+    AgentResult,
+    CodeProblem,
+    Decision,
+    ExecutionResult,
+    LLMCall,
+    Message,
+    Proposal,
+)
 
 
 def derive_seed(*parts: object) -> int:
@@ -76,15 +85,24 @@ class Agent:
     def roles(self) -> dict[str, Role]:
         return {**self.specialists, "coordinator": self.coordinator}
 
-    async def _ask(
+    async def _call(
         self, role: Role, messages: list[Message], *seed_parts: object
-    ) -> str:
-        return await self.client.chat(
+    ) -> LLMCall:
+        seed = derive_seed(self.seed, role.name, *seed_parts)
+        response = await self.client.chat(
             messages,
             model=role.model,
             temperature=role.persona.temperature,
             max_tokens=self.max_tokens,
-            seed=derive_seed(self.seed, role.name, *seed_parts),
+            seed=seed,
+        )
+        return LLMCall(
+            role=role.name,
+            model=role.model,
+            messages=messages,
+            response=response,
+            temperature=role.persona.temperature,
+            seed=seed,
         )
 
     async def _attempt(
@@ -94,11 +112,12 @@ class Agent:
         memory_text: str,
         previous: Decision | None,
         purpose: str,
-    ) -> tuple[list[Proposal], list[Message], str, str, str | None]:
+    ) -> Decision:
+        """Specialists propose, the coordinator decides. Not yet judged."""
         roles = list(self.specialists.values())
-        responses = await asyncio.gather(
+        specialist_calls = await asyncio.gather(
             *(
-                self._ask(
+                self._call(
                     role,
                     specialist_messages(role.persona, problem, memory_text, previous),
                     purpose,
@@ -109,23 +128,35 @@ class Agent:
             )
         )
         proposals = [
-            Proposal(specialist=role.name, code=extract_code(text))
-            for role, text in zip(roles, responses)
+            Proposal(specialist=call.role, code=extract_code(call.response))
+            for call in specialist_calls
         ]
-        output = await self._ask(
+        shown = list(proposals)
+        random.Random(
+            derive_seed(self.seed, "order", purpose, problem.task_id, attempt_number)
+        ).shuffle(shown)
+        coordinator_call = await self._call(
             self.coordinator,
             coordinator_messages(
-                self.coordinator.persona, problem, proposals, memory_text, previous
+                self.coordinator.persona, problem, shown, memory_text, previous
             ),
             purpose,
             problem.task_id,
             attempt_number,
         )
-        code, choice = parse_coordinator(output, proposals)
-        training_prompt = coordinator_messages(
-            self.coordinator.persona, problem, proposals, "", previous
+        code, choice = parse_coordinator(coordinator_call.response, proposals)
+        return Decision(
+            attempt_number=attempt_number,
+            calls=[*specialist_calls, coordinator_call],
+            proposals=proposals,
+            coordinator_prompt=coordinator_messages(
+                self.coordinator.persona, problem, shown, "", previous
+            ),
+            coordinator_output=coordinator_call.response,
+            code=code,
+            choice=choice,
+            result=ExecutionResult(passed=False, tests_passed=0, tests_total=0),
         )
-        return proposals, training_prompt, output, code, choice
 
     async def solve(self, problem: CodeProblem) -> AgentResult:
         """Work on a problem until the world accepts an answer or attempts run out."""
@@ -136,18 +167,10 @@ class Agent:
         decisions: list[Decision] = []
         previous: Decision | None = None
         for attempt_number in range(1, self.max_attempts + 1):
-            proposals, prompt, output, code, choice = await self._attempt(
+            decision = await self._attempt(
                 problem, attempt_number, memory_text, previous, "solve"
             )
-            decision = Decision(
-                attempt_number=attempt_number,
-                proposals=proposals,
-                coordinator_prompt=prompt,
-                coordinator_output=output,
-                code=code,
-                choice=choice,
-                result=await self.sandbox.run_tests(code, problem),
-            )
+            decision.result = await self.sandbox.run_tests(decision.code, problem)
             decisions.append(decision)
             if decision.result.passed:
                 break
@@ -157,24 +180,32 @@ class Agent:
             agent=self.name, problem_id=problem.task_id, decisions=decisions
         )
 
-    async def answer(self, problem: CodeProblem) -> str:
-        """One attempt with no memory and no feedback: the agent's Pass@1 answer."""
-        *_, code, _ = await self._attempt(problem, 1, "", None, "eval")
-        return code
+    async def answer(self, problem: CodeProblem, sample: int = 0) -> str:
+        """One attempt with no memory and no feedback: a Pass@1 sample."""
+        decision = await self._attempt(problem, 1, "", None, f"eval{sample}")
+        return decision.code
 
-    async def write_probes(self, problem: CodeProblem) -> list[str]:
+    async def write_probes(self, problem: CodeProblem) -> tuple[list[str], LLMCall]:
         """Example calls the agent invents to compare solutions' behaviour."""
-        text = await self._ask(
+        call = await self._call(
             self.coordinator,
             probe_messages(problem, self.probes_per_problem),
             "probes",
             problem.task_id,
         )
-        return parse_probes(text, problem.entry_point, self.probes_per_problem)
-
-    async def reflect(self, experiences: str, count: int, cycle: int) -> list[str]:
-        """Sleep: distil recent experiences into general lessons."""
-        text = await self._ask(
-            self.coordinator, reflection_messages(experiences, count), "reflect", cycle
+        return (
+            parse_probes(call.response, problem.entry_point, self.probes_per_problem),
+            call,
         )
-        return parse_lessons(text, count)
+
+    async def reflect(
+        self, lessons: list[str], cases: list[str], max_new: int, cycle: int
+    ) -> tuple[list[tuple[str, int | None, str]], LLMCall]:
+        """Sleep: compare wrong answers with accepted solutions; edit the lessons."""
+        call = await self._call(
+            self.coordinator,
+            reflection_messages(lessons, cases, max_new),
+            "reflect",
+            cycle,
+        )
+        return parse_reflection(call.response, len(lessons)), call

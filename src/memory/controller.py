@@ -11,7 +11,7 @@ from typing import Any
 
 from src.memory.embedder import Embedder
 from src.memory.episodic import EpisodicStore
-from src.memory.models import EpisodicEntry, MemoryContext
+from src.memory.models import EpisodicEntry, MemoryContext, SemanticEntry
 from src.memory.semantic import SemanticStore
 from src.memory.working import WorkingMemory
 
@@ -52,7 +52,7 @@ class AgentMemory:
         )
         return MemoryContext(
             episodic=episodes,
-            semantic=self.semantic.recent(LESSON, limit=self.lessons_in_prompt),
+            semantic=self.lessons()[: self.lessons_in_prompt],
             working=self.working.get_items(),
         )
 
@@ -85,9 +85,42 @@ class AgentMemory:
             if e.metadata.get("cycle") == cycle
         ]
 
-    def add_lessons(self, lessons: list[str]) -> None:
-        for lesson in lessons:
-            self.semantic.add_or_update(lesson, LESSON, confidence_delta=0.1)
+    def lessons(self) -> list[SemanticEntry]:
+        """Current lessons, most trusted first."""
+        return self.semantic.retrieve(category=LESSON, min_confidence=0.0, limit=50)
+
+    def apply_reflection(
+        self,
+        ops: list[tuple[str, int | None, str]],
+        numbered: list[SemanticEntry],
+        banned_terms: set[str],
+    ) -> list[str]:
+        """Apply ADD / AGREE / DISAGREE / EDIT operations from a sleep reflection.
+
+        `numbered` is the lesson list the reflection saw (1-based). Lessons that
+        mention any banned term (e.g. a problem's function name) are rejected,
+        so lessons stay general instead of memorising specific problems.
+        """
+
+        def allowed(text: str) -> bool:
+            lowered = text.lower()
+            return not any(term.lower() in lowered for term in banned_terms)
+
+        for kind, number, text in ops:
+            target = (
+                numbered[number - 1]
+                if number is not None and 1 <= number <= len(numbered)
+                else None
+            )
+            if kind == "add" and allowed(text):
+                self.semantic.add_or_update(text, LESSON, confidence_delta=0.1)
+            elif kind == "agree" and target is not None:
+                self.semantic.adjust(target.id, 0.1)
+            elif kind == "disagree" and target is not None:
+                self.semantic.adjust(target.id, -0.2)
+            elif kind == "edit" and target is not None and allowed(text):
+                self.semantic.edit(target.id, text)
+        return [entry.concept for entry in self.lessons()]
 
     def prune(self) -> int:
         return self.episodic.prune(max_entries=self.max_episodic)

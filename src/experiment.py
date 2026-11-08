@@ -29,9 +29,9 @@ from src.models.code import (
 from src.training.community import play_round, remember_round
 from src.training.preferences import build_pairs
 from src.training.registry import AdapterRegistry, AdapterVersion
-from src.training.trainer import make_job, run_jobs, write_dataset
+from src.training.trainer import make_job, run_jobs, training_summary, write_dataset
 
-MAX_EXPERIENCES_PER_REFLECTION = 30
+MAX_CASES_PER_REFLECTION = 8
 
 
 def _normalise(code: str) -> str:
@@ -114,39 +114,34 @@ class Experiment:
     async def _validate(
         self, problems: list[CodeProblem]
     ) -> tuple[dict[str, float], float | None, float | None]:
-        """Pass@1 per agent, plus how much the agents' answers differ."""
+        """Pass@1 per agent (averaged over samples), plus how much the agents'
+        answers differ (on the first sample)."""
         names = list(self.agents)
-        answers = await asyncio.gather(
-            *(
-                asyncio.gather(*(self.agents[n].answer(p) for p in problems))
-                for n in names
-            )
-        )
+        k = self.cfg.evaluation.validation_samples
+        jobs = [(n, p, s) for n in names for p in problems for s in range(k)]
+        codes = await asyncio.gather(*(self.agents[n].answer(p, s) for n, p, s in jobs))
         verdicts = await asyncio.gather(
-            *(
-                asyncio.gather(
-                    *(
-                        self.sandbox.run_tests(code, p)
-                        for code, p in zip(codes, problems)
-                    )
-                )
-                for codes in answers
-            )
+            *(self.sandbox.run_tests(code, p) for code, (_, p, _) in zip(codes, jobs))
         )
-        passed = {n: [v.passed for v in vs] for n, vs in zip(names, verdicts)}
-        scores = {n: sum(ok) / len(problems) for n, ok in passed.items()}
+        passed: dict[str, dict[tuple[str, int], bool]] = {n: {} for n in names}
+        first_code: dict[str, dict[str, str]] = {n: {} for n in names}
+        for (n, p, s), code, v in zip(jobs, codes, verdicts):
+            passed[n][(p.task_id, s)] = v.passed
+            if s == 0:
+                first_code[n][p.task_id] = code
+        scores = {n: sum(ok.values()) / len(ok) for n, ok in passed.items()}
         if len(names) < 2:
             return scores, None, None
-        code_by = dict(zip(names, answers))
         pairs = list(itertools.combinations(names, 2))
+        ids = [p.task_id for p in problems]
         divergence = sum(
-            _normalise(x) != _normalise(y)
+            _normalise(first_code[a][t]) != _normalise(first_code[b][t])
             for a, b in pairs
-            for x, y in zip(code_by[a], code_by[b])
-        ) / (len(pairs) * len(problems))
+            for t in ids
+        ) / (len(pairs) * len(ids))
         disagreement = sum(
-            x != y for a, b in pairs for x, y in zip(passed[a], passed[b])
-        ) / (len(pairs) * len(problems))
+            passed[a][(t, 0)] != passed[b][(t, 0)] for a, b in pairs for t in ids
+        ) / (len(pairs) * len(ids))
         return scores, divergence, disagreement
 
     async def _evalplus(self, stage: str) -> list[EvalScore]:
@@ -156,7 +151,10 @@ class Experiment:
             for benchmark in self.cfg.evaluation.benchmarks:
                 self.console.print(f"  EvalPlus {benchmark} · agent {name} ({stage})")
                 score.scores[benchmark] = await evalplus_eval.evaluate(
-                    agent, benchmark, self.run_dir / "evalplus" / stage
+                    agent,
+                    benchmark,
+                    self.run_dir / "evalplus" / stage,
+                    self.cfg.evaluation.samples,
                 )
             scores.append(score)
         return scores
@@ -195,21 +193,45 @@ class Experiment:
 
     # ── sleep ────────────────────────────────────────────────────────────────
 
-    async def _reflect(self, cycle: int, metrics: CycleMetrics) -> None:
+    async def _reflect(
+        self, cycle: int, rounds: list[RoundResult], metrics: CycleMetrics
+    ) -> None:
+        """Sleep, part 1: compare wrong answers with the solutions later accepted
+        and edit the lesson list (ExpeL-style ADD / AGREE / DISAGREE / EDIT)."""
+        banned = {r.problem.entry_point for r in rounds} | {
+            r.problem.task_id for r in rounds
+        }
         for name, agent in self.agents.items():
             if agent.memory is None:
                 continue
-            episodes = agent.memory.episodes_from_cycle(cycle)[
-                :MAX_EXPERIENCES_PER_REFLECTION
-            ]
-            if episodes:
-                lessons = await agent.reflect(
-                    "\n\n".join(e.content for e in episodes),
+            cases: list[str] = []
+            for r in rounds:
+                known = r.known_solution.get(name)
+                wrong = [d for d in r.results[name].decisions if not d.result.passed]
+                if known is None or not wrong:
+                    continue
+                source = (
+                    "your team" if known.found_by == name else f"agent {known.found_by}"
+                )
+                cases.append(
+                    f"### Case {len(cases) + 1}\nProblem:\n{r.problem.prompt}\n"
+                    f"Your team's wrong answer:\n```python\n{wrong[-1].code}\n```\n"
+                    f"Accepted solution (found by {source}):\n"
+                    f"```python\n{known.code}\n```"
+                )
+            cases = cases[-MAX_CASES_PER_REFLECTION:]
+            if cases:
+                numbered = agent.memory.lessons()
+                ops, call = await agent.reflect(
+                    [e.concept for e in numbered],
+                    cases,
                     self.cfg.memory.lessons_per_sleep,
                     cycle,
                 )
-                agent.memory.add_lessons(lessons)
-                metrics.lessons[name] = lessons
+                metrics.lessons[name] = agent.memory.apply_reflection(
+                    ops, numbered, banned
+                )
+                metrics.reflections[name] = call
             agent.memory.prune()
             agent.memory.end_session()
 
@@ -242,11 +264,16 @@ class Experiment:
         if not jobs:
             return []
         self.console.print(f"  Training {len(jobs)} adapters")
-        await run_jobs(jobs, self.cfg.training.parallel_jobs)
+        await run_jobs(
+            jobs, self.cfg.training.slots_dir, self.cfg.training.global_slots
+        )
 
         updated = []
         for key, job in jobs.items():
             name, role = key.split("/")
+            metrics.training.setdefault(name, {})[role] = training_summary(
+                Path(job.output_dir), metrics.preference_pairs[name][role]
+            )
             served = f"{self.cfg.experiment.name}-{self.session}-{name}-{role}-c{cycle}"
             await self.client.load_adapter(served, Path(job.output_dir))
             self.registry.push(
@@ -305,7 +332,7 @@ class Experiment:
             self._summarise(rounds, metrics)
 
             self.console.print("  Sleep")
-            await self._reflect(cycle, metrics)
+            await self._reflect(cycle, rounds, metrics)
             updated = (
                 await self._train(cycle, rounds, metrics)
                 if self.cfg.training.enabled

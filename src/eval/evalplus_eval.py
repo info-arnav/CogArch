@@ -24,38 +24,49 @@ def load_problems(benchmark: str) -> dict[str, dict]:
 
 
 def pass_at_1(results_path: Path) -> dict[str, float]:
-    """Base and plus Pass@1 from an EvalPlus results file (one sample per task)."""
-    tasks = json.loads(results_path.read_text())["eval"]
-    n = len(tasks)
-    base = sum(r[0]["base_status"] == "pass" for r in tasks.values())
-    plus = sum(
-        r[0]["base_status"] == "pass" and r[0]["plus_status"] == "pass"
-        for r in tasks.values()
-    )
-    return {"base": base / n, "plus": plus / n}
+    """Base and plus Pass@1 from an EvalPlus results file, averaged over each
+    task's samples and then over tasks."""
+    tasks = json.loads(results_path.read_text())["eval"].values()
+    base = [sum(s["base_status"] == "pass" for s in t) / len(t) for t in tasks]
+    plus = [
+        sum(s["base_status"] == "pass" and s["plus_status"] == "pass" for s in t)
+        / len(t)
+        for t in tasks
+    ]
+    return {"base": sum(base) / len(base), "plus": sum(plus) / len(plus)}
 
 
-async def evaluate(agent: Agent, benchmark: str, out_dir: Path) -> dict[str, float]:
+async def evaluate(
+    agent: Agent, benchmark: str, out_dir: Path, samples: int = 1
+) -> dict[str, float]:
+    """Pass@1 averaged over `samples` independent answers per task."""
     from evalplus.evaluate import evaluate as evalplus_evaluate
     from evalplus.sanitize import sanitize
 
     problems = load_problems(benchmark)
     tasks = [
         CodeProblem(
-            task_id=tid, prompt=p["prompt"], entry_point=p["entry_point"], tests=[]
+            task_id=tid,
+            prompt=p["prompt"],
+            prompt_is_code=True,
+            entry_point=p["entry_point"],
+            tests=[],
         )
         for tid, p in problems.items()
     ]
-    codes = await asyncio.gather(*(agent.answer(t) for t in tasks))
+    jobs = [(task, i) for task in tasks for i in range(samples)]
+    codes = await asyncio.gather(*(agent.answer(task, i) for task, i in jobs))
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    samples = out_dir / f"{benchmark}_{agent.name}.jsonl"
+    samples_path = out_dir / f"{benchmark}_{agent.name}.jsonl"
     results = out_dir / f"{benchmark}_{agent.name}_eval_results.json"
     results.unlink(missing_ok=True)
-    with open(samples, "w") as f:
-        for task, code in zip(tasks, codes):
+    with open(samples_path, "w") as f:
+        for (task, _), code in zip(jobs, codes):
             solution = sanitize(code, task.entry_point)
             f.write(json.dumps({"task_id": task.task_id, "solution": solution}) + "\n")
 
-    await asyncio.to_thread(evalplus_evaluate, dataset=benchmark, samples=str(samples))
+    await asyncio.to_thread(
+        evalplus_evaluate, dataset=benchmark, samples=str(samples_path)
+    )
     return pass_at_1(results)

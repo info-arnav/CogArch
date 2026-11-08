@@ -20,7 +20,7 @@ async def test_recall_similar_episode_and_lessons(tmp_path):
     await memory.record(
         "prime sieve", key="Find prime numbers", importance=0.9, metadata={"cycle": 1}
     )
-    memory.add_lessons(["Check empty input"])
+    memory.apply_reflection([("add", None, "Check empty input")], [], set())
     memory.note("mbpp/3: wrong")
 
     ctx = await memory.recall("Sort these numbers")
@@ -37,3 +37,30 @@ async def test_episodes_from_cycle_and_session(tmp_path):
     memory.note("x")
     memory.end_session()
     assert memory.stats()["working"] == 0
+
+
+def test_reflection_operations_and_banned_terms(tmp_path):
+    memory = AgentMemory(tmp_path, KeywordEmbedder())
+    memory.apply_reflection(
+        [
+            ("add", None, "Guard against empty lists"),
+            ("add", None, "remove_Occ needs a loop"),
+        ],
+        [],
+        banned_terms={"remove_Occ"},
+    )
+    numbered = memory.lessons()
+    assert [e.concept for e in numbered] == ["Guard against empty lists"]
+
+    memory.apply_reflection([("agree", 1, "")], numbered, set())
+    assert memory.lessons()[0].confidence > numbered[0].confidence
+
+    numbered = memory.lessons()
+    memory.apply_reflection(
+        [("edit", 1, "Guard against empty inputs")], numbered, set()
+    )
+    assert memory.lessons()[0].concept == "Guard against empty inputs"
+
+    for _ in range(4):
+        memory.apply_reflection([("disagree", 1, "")], memory.lessons(), set())
+    assert memory.lessons() == []

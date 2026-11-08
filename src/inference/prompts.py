@@ -33,12 +33,27 @@ def load_coordinator(prompts_dir: Path = PROMPTS_DIR) -> Persona:
 # ── shared pieces ────────────────────────────────────────────────────────────
 
 
-def task_text(problem: CodeProblem) -> str:
-    return f"{problem.prompt}\n\nImplement the function `{problem.entry_point}`."
+# EvalPlus's instruction for chat models, so scores are comparable to published ones.
+INSTRUCTION = (
+    "Please provide a self-contained Python script that solves the following problem "
+    "in a markdown code block:"
+)
 
 
 def _code_block(code: str) -> str:
     return f"```python\n{code}\n```"
+
+
+def task_text(problem: CodeProblem) -> str:
+    body = (
+        _code_block(problem.prompt.strip())
+        if problem.prompt_is_code
+        else problem.prompt.strip()
+    )
+    return (
+        f"{INSTRUCTION}\n{body}\n\n"
+        f"The solution must define the function `{problem.entry_point}`."
+    )
 
 
 def _with_memory(text: str, memory_text: str) -> str:
@@ -81,6 +96,8 @@ def coordinator_messages(
     memory_text: str = "",
     previous: Decision | None = None,
 ) -> list[Message]:
+    """Proposals are listed in the order given; callers shuffle them per decision
+    so that position bias cannot masquerade as trust in a specialist."""
     sections = [task_text(problem)]
     if previous is not None:
         sections.append(_previous_attempt(previous))
@@ -145,32 +162,48 @@ def parse_probes(text: str, entry_point: str, limit: int) -> list[str]:
     return probes[:limit]
 
 
-# ── sleep: reflection ────────────────────────────────────────────────────────
+# ── sleep: reflection (ExpeL-style rule list editing) ───────────────────────
 
 
-def reflection_messages(experiences: str, count: int) -> list[Message]:
+def reflection_messages(
+    lessons: list[str], cases: list[str], max_new: int
+) -> list[Message]:
+    current = (
+        "\n".join(f"{i}. {lesson}" for i, lesson in enumerate(lessons, start=1))
+        if lessons
+        else "(none yet)"
+    )
     return _messages(
-        "You review a coding team's recent experiences and distil lasting lessons.",
-        f"Recent experiences:\n\n{experiences}\n\n"
-        "Compare the problems the team got wrong with the solutions that were "
-        "eventually accepted. What kinds of mistakes did the team make, and what "
-        "would have avoided them?\n\n"
-        f"Write up to {count} specific lessons drawn from these experiences, one per "
-        "line, each starting with '- '. Avoid generic advice (such as 'write tests' or "
-        "'use clear names'); name the concrete pitfall. Do not include solutions to "
-        "specific problems.",
+        "You maintain a coding team's list of lessons learned from its mistakes.",
+        f"Current lessons:\n{current}\n\n"
+        "Cases from the last cycle where the team was told its answer was wrong and "
+        "a solution was later accepted:\n\n" + "\n\n".join(cases) + "\n\n"
+        "Compare each wrong answer with the accepted solution and update the lessons. "
+        "Reply with operations, one per line:\n"
+        "ADD: <new lesson>\n"
+        "AGREE <number>   (an existing lesson is confirmed by these cases)\n"
+        "DISAGREE <number>   (an existing lesson is contradicted or useless)\n"
+        "EDIT <number>: <improved lesson>\n\n"
+        f"Use at most {max_new} ADD or EDIT operations. A lesson must be a general rule "
+        "about a kind of mistake that would help on other problems. Never mention "
+        "function names, specific problems or their solutions.",
     )
 
 
-def parse_lessons(text: str, limit: int) -> list[str]:
-    lessons = []
+def parse_reflection(text: str, existing: int) -> list[tuple[str, int | None, str]]:
+    """Operations as (kind, lesson number or None, text)."""
+    ops: list[tuple[str, int | None, str]] = []
     for line in text.splitlines():
-        line = line.strip()
-        if line.startswith(("- ", "* ")):
-            lesson = line[2:].strip()
-            if lesson and lesson not in lessons:
-                lessons.append(lesson)
-    return lessons[:limit]
+        line = line.strip().lstrip("-* ").strip()
+        if m := re.match(r"(?i)ADD\s*:\s*(.+)", line):
+            ops.append(("add", None, m.group(1).strip()))
+        elif m := re.match(r"(?i)EDIT\s+(\d+)\s*:\s*(.+)", line):
+            if 1 <= int(m.group(1)) <= existing:
+                ops.append(("edit", int(m.group(1)), m.group(2).strip()))
+        elif m := re.match(r"(?i)(AGREE|DISAGREE)\s+(\d+)", line):
+            if 1 <= int(m.group(2)) <= existing:
+                ops.append((m.group(1).lower(), int(m.group(2)), ""))
+    return ops
 
 
 # ── parsing ──────────────────────────────────────────────────────────────────

@@ -64,14 +64,22 @@ class TrainingConfig(BaseModel):
     lora_rank: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.05
-    learning_rate: float = 5e-6
+    learning_rate: float = 2e-5
     beta: float = 0.1
-    epochs: int = 2
-    batch_size: int = 4
-    grad_accumulation: int = 2
+    nll_weight: float = Field(
+        default=1.0,
+        description="Weight of the NLL term on chosen responses (RPO; 0 = plain DPO)",
+    )
+    epochs: int = 3
+    batch_size: int = 2
+    grad_accumulation: int = 1
     max_length: int = 3072
-    min_pairs: int = 8
-    parallel_jobs: int = 4
+    min_pairs: int = 4
+    global_slots: int = Field(
+        default=4,
+        description="DPO jobs allowed at once on this machine, across all runs",
+    )
+    slots_dir: Path = Path("data/runs/.training-slots")
     rollback_threshold: float = 0.1
 
 
@@ -87,6 +95,10 @@ class MemoryConfig(BaseModel):
 
 
 class EvaluationConfig(BaseModel):
+    samples: int = Field(
+        default=5, ge=1, description="Pass@1 samples per EvalPlus task"
+    )
+    validation_samples: int = Field(default=3, ge=1)
     benchmarks: list[str] = Field(
         default_factory=lambda: ["humaneval", "mbpp"],
         description="EvalPlus datasets, scored at the start and end of a run ([] to skip)",

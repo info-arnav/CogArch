@@ -74,7 +74,8 @@ async def run(cfg: Config, console: Console) -> None:
                 cfg.training, cfg.model.base, None, dataset, adapter, seed=0
             )
         },
-        parallel=1,
+        cfg.training.slots_dir,
+        cfg.training.global_slots,
     )
     console.print(f"   ok ({time.perf_counter() - start:.0f}s)")
 
