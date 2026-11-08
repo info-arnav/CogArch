@@ -12,7 +12,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 mkdir -p "$REPO/data/runs/logs"
 
 for replicate in $(seq 1 "$REPLICATES"); do
-  for config in pilot pilot_solo; do
+  for config in general general_solo; do
     name="$(grep -E '^  name:' "$REPO/config/${config}.yaml" | awk '{print $2}')-r${replicate}"
     docker exec -d -w "$REPO" cogarch-exp sh -c \
       "python -m cli.main run config/${config}.yaml --replicate ${replicate} ${MODEL_ARG} > data/runs/logs/${name}.log 2>&1"

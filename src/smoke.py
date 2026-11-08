@@ -18,7 +18,7 @@ from rich.console import Console
 from src.config import Config
 from src.execution.sandbox import Sandbox
 from src.inference.client import InferenceClient
-from src.models.code import CodeProblem, Message, PreferencePair
+from src.models.core import Message, PreferencePair, Task
 from src.training.trainer import make_job, run_jobs, write_dataset
 
 _PROMPT = [
@@ -43,8 +43,13 @@ async def run(cfg: Config, console: Console) -> None:
 
     console.print("2. Sandbox")
     sandbox = Sandbox(cfg.environment.feedback)
-    problem = CodeProblem(
-        task_id="t", prompt="", entry_point="add", tests=["assert add(1, 2) == 3"]
+    problem = Task(
+        task_id="t",
+        domain="code",
+        kind="code",
+        prompt="",
+        entry_point="add",
+        tests=["assert add(1, 2) == 3"],
     )
     good = await sandbox.run_tests("def add(a, b):\n    return a + b", problem)
     bad = await sandbox.run_tests("def add(a, b):\n    return a - b", problem)
@@ -54,7 +59,8 @@ async def run(cfg: Config, console: Console) -> None:
     console.print("3. DPO training job")
     pairs = [
         PreferencePair(
-            problem_id=f"p{i}",
+            task_id=f"p{i}",
+            domain="code",
             agent="a",
             role="logical",
             prompt=_PROMPT,

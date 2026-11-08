@@ -13,7 +13,7 @@ from typing import Any
 
 from src.config import FeedbackLevel
 from src.execution.feedback import describe_failure
-from src.models.code import CodeProblem, ExecutionResult
+from src.models.core import Task, Verdict
 
 _HARNESS = Path(__file__).with_name("harness.py")
 
@@ -51,7 +51,7 @@ class Sandbox:
         self.memory_limit_mb = memory_limit_mb
         self._slots = asyncio.Semaphore(max_parallel or os.cpu_count() or 4)
 
-    async def run_tests(self, code: str, problem: CodeProblem) -> ExecutionResult:
+    async def run_tests(self, code: str, problem: Task) -> Verdict:
         raw, timed_out = await self._execute(
             {
                 "mode": "tests",
@@ -62,7 +62,7 @@ class Sandbox:
         )
         total = len(problem.tests)
         if timed_out:
-            result = ExecutionResult(
+            result = Verdict(
                 passed=False,
                 tests_passed=0,
                 tests_total=total,
@@ -71,14 +71,14 @@ class Sandbox:
             )
         elif raw is None:
             # Harness died without reporting (memory limit, os._exit, ...).
-            result = ExecutionResult(
+            result = Verdict(
                 passed=False,
                 tests_passed=0,
                 tests_total=total,
                 error_types=["ProcessCrashed"],
             )
         elif raw["load_error"] is not None:
-            result = ExecutionResult(
+            result = Verdict(
                 passed=False,
                 tests_passed=0,
                 tests_total=total,
@@ -87,7 +87,7 @@ class Sandbox:
         else:
             outcomes = raw["tests"]
             passed = sum(t["passed"] for t in outcomes)
-            result = ExecutionResult(
+            result = Verdict(
                 passed=total > 0 and passed == total,
                 tests_passed=passed,
                 tests_total=total,

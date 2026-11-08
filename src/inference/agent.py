@@ -1,9 +1,14 @@
 """An agent: four specialists, a coordinator, and a memory.
 
-Per attempt, every specialist proposes a solution, the coordinator reads the
-proposals and decides the team's answer, and only that answer is judged by
-the environment. The verdict ("wrong" or accepted) is what the whole agent
-learns from.
+Each attempt has three stages, like specialised brain regions exchanging
+information through a shared workspace before the executive decides:
+
+  1. round 1   every specialist answers on its own
+  2. round 2   every specialist sees the others' answers, discusses, and revises
+  3. decide    the coordinator weighs the final positions and writes the answer
+
+Only the coordinator's answer is judged by the environment, which says only
+whether it was wrong.
 """
 
 from __future__ import annotations
@@ -13,13 +18,12 @@ import hashlib
 import random
 from dataclasses import dataclass
 
-from src.execution.sandbox import Sandbox
+from src.environment import Environment, extract_answer
 from src.inference.client import ChatModel
 from src.inference.prompts import (
     Persona,
     coordinator_messages,
-    extract_code,
-    parse_coordinator,
+    discussion_messages,
     parse_probes,
     parse_reflection,
     probe_messages,
@@ -27,14 +31,14 @@ from src.inference.prompts import (
     specialist_messages,
 )
 from src.memory.controller import AgentMemory
-from src.models.code import (
+from src.models.core import (
     AgentResult,
-    CodeProblem,
     Decision,
-    ExecutionResult,
     LLMCall,
     Message,
     Proposal,
+    Task,
+    Verdict,
 )
 
 
@@ -64,31 +68,33 @@ class Agent:
         specialists: dict[str, Role],
         coordinator: Role,
         client: ChatModel,
-        sandbox: Sandbox,
+        environment: Environment,
         memory: AgentMemory | None,
         max_attempts: int,
         max_tokens: int,
         probes_per_problem: int,
+        discussion: bool = True,
     ) -> None:
         self.name = name
         self.seed = seed
         self.specialists = specialists
         self.coordinator = coordinator
         self.client = client
-        self.sandbox = sandbox
+        self.environment = environment
         self.memory = memory
         self.max_attempts = max_attempts
         self.max_tokens = max_tokens
         self.probes_per_problem = probes_per_problem
+        self.discussion = discussion
 
     @property
     def roles(self) -> dict[str, Role]:
         return {**self.specialists, "coordinator": self.coordinator}
 
     async def _call(
-        self, role: Role, messages: list[Message], *seed_parts: object
+        self, role: Role, stage: str, messages: list[Message], *seed_parts: object
     ) -> LLMCall:
-        seed = derive_seed(self.seed, role.name, *seed_parts)
+        seed = derive_seed(self.seed, role.name, stage, *seed_parts)
         response = await self.client.chat(
             messages,
             model=role.model,
@@ -98,6 +104,7 @@ class Agent:
         )
         return LLMCall(
             role=role.name,
+            stage=stage,
             model=role.model,
             messages=messages,
             response=response,
@@ -105,107 +112,159 @@ class Agent:
             seed=seed,
         )
 
-    async def _attempt(
+    async def _deliberate(
         self,
-        problem: CodeProblem,
-        attempt_number: int,
+        task: Task,
+        attempt: int,
         memory_text: str,
         previous: Decision | None,
         purpose: str,
     ) -> Decision:
-        """Specialists propose, the coordinator decides. Not yet judged."""
+        """Round 1, discussion, decision. Returns an unjudged decision."""
         roles = list(self.specialists.values())
-        specialist_calls = await asyncio.gather(
+        key = (purpose, task.task_id, attempt)
+
+        first = await asyncio.gather(
             *(
                 self._call(
-                    role,
-                    specialist_messages(role.persona, problem, memory_text, previous),
-                    purpose,
-                    problem.task_id,
-                    attempt_number,
+                    r,
+                    "round1",
+                    specialist_messages(r.persona, task, memory_text, previous),
+                    *key,
                 )
-                for role in roles
+                for r in roles
             )
         )
-        proposals = [
-            Proposal(specialist=call.role, code=extract_code(call.response))
-            for call in specialist_calls
+        round1 = [
+            Proposal(
+                specialist=c.role,
+                round=1,
+                response=c.response,
+                answer=extract_answer(task, c.response),
+            )
+            for c in first
         ]
-        shown = list(proposals)
-        random.Random(
-            derive_seed(self.seed, "order", purpose, problem.task_id, attempt_number)
-        ).shuffle(shown)
-        coordinator_call = await self._call(
+
+        second: list[LLMCall] = []
+        if self.discussion:
+            second = list(
+                await asyncio.gather(
+                    *(
+                        self._call(
+                            r,
+                            "round2",
+                            discussion_messages(
+                                r.persona,
+                                task,
+                                own,
+                                [p for p in round1 if p.specialist != r.name],
+                                memory_text,
+                                previous,
+                            ),
+                            *key,
+                        )
+                        for r, own in zip(roles, round1)
+                    )
+                )
+            )
+            round2 = [
+                Proposal(
+                    specialist=c.role,
+                    round=2,
+                    response=c.response,
+                    answer=extract_answer(task, c.response),
+                )
+                for c in second
+            ]
+        else:
+            round2 = [p.model_copy(update={"round": 2}) for p in round1]
+
+        shown = list(round2)
+        random.Random(derive_seed(self.seed, "order", *key)).shuffle(shown)
+        decide = await self._call(
             self.coordinator,
+            "decide",
             coordinator_messages(
-                self.coordinator.persona, problem, shown, memory_text, previous
+                self.coordinator.persona, task, shown, memory_text, previous
             ),
-            purpose,
-            problem.task_id,
-            attempt_number,
+            *key,
         )
-        code, choice = parse_coordinator(coordinator_call.response, proposals)
         return Decision(
-            attempt_number=attempt_number,
-            calls=[*specialist_calls, coordinator_call],
-            proposals=proposals,
+            attempt_number=attempt,
+            calls=[*first, *second, decide],
+            round1=round1,
+            round2=round2,
+            specialist_prompts={
+                r.name: specialist_messages(r.persona, task, "", previous)
+                for r in roles
+            },
             coordinator_prompt=coordinator_messages(
-                self.coordinator.persona, problem, shown, "", previous
+                self.coordinator.persona, task, shown, "", previous
             ),
-            coordinator_output=coordinator_call.response,
-            code=code,
-            choice=choice,
-            result=ExecutionResult(passed=False, tests_passed=0, tests_total=0),
+            coordinator_output=decide.response,
+            answer=extract_answer(task, decide.response),
+            result=Verdict(passed=False),
         )
 
-    async def solve(self, problem: CodeProblem) -> AgentResult:
-        """Work on a problem until the world accepts an answer or attempts run out."""
+    async def solve(self, task: Task) -> AgentResult:
+        """Work on a task until the world accepts an answer or attempts run out."""
         memory_text = ""
         if self.memory is not None:
-            memory_text = (await self.memory.recall(problem.prompt)).to_prompt_text()
+            memory_text = (await self.memory.recall(task.prompt)).to_prompt_text()
+        attempts = task.max_attempts or self.max_attempts
 
         decisions: list[Decision] = []
         previous: Decision | None = None
-        for attempt_number in range(1, self.max_attempts + 1):
-            decision = await self._attempt(
-                problem, attempt_number, memory_text, previous, "solve"
+        for attempt in range(1, attempts + 1):
+            decision = await self._deliberate(
+                task, attempt, memory_text, previous, "solve"
             )
-            decision.result = await self.sandbox.run_tests(decision.code, problem)
+            decision.result = await self.environment.judge(task, decision.answer)
             decisions.append(decision)
             if decision.result.passed:
                 break
             previous = decision
+        return AgentResult(agent=self.name, task_id=task.task_id, decisions=decisions)
 
-        return AgentResult(
-            agent=self.name, problem_id=problem.task_id, decisions=decisions
+    async def answer(self, task: Task, sample: int = 0) -> str:
+        """The whole brain, one attempt, no memory, no feedback (a Pass@1 sample)."""
+        decision = await self._deliberate(task, 1, "", None, f"eval{sample}")
+        return decision.answer
+
+    async def solo_answer(self, specialist: str, task: Task, sample: int = 0) -> str:
+        """One specialist alone with its own persona (no discussion, no coordinator)."""
+        role = self.specialists[specialist]
+        call = await self._call(
+            role,
+            "eval",
+            specialist_messages(role.persona, task),
+            "solo",
+            task.task_id,
+            sample,
         )
+        return extract_answer(task, call.response)
 
-    async def answer(self, problem: CodeProblem, sample: int = 0) -> str:
-        """One attempt with no memory and no feedback: a Pass@1 sample."""
-        decision = await self._attempt(problem, 1, "", None, f"eval{sample}")
-        return decision.code
-
-    async def write_probes(self, problem: CodeProblem) -> tuple[list[str], LLMCall]:
-        """Example calls the agent invents to compare solutions' behaviour."""
+    async def write_probes(self, task: Task) -> tuple[list[str], LLMCall]:
+        """Example calls the agent invents to compare code solutions' behaviour."""
         call = await self._call(
             self.coordinator,
-            probe_messages(problem, self.probes_per_problem),
             "probes",
-            problem.task_id,
+            probe_messages(task, self.probes_per_problem),
+            task.task_id,
         )
         return (
-            parse_probes(call.response, problem.entry_point, self.probes_per_problem),
+            parse_probes(call.response, task.entry_point, self.probes_per_problem),
             call,
         )
 
     async def reflect(
         self, lessons: list[str], cases: list[str], max_new: int, cycle: int
     ) -> tuple[list[tuple[str, int | None, str]], LLMCall]:
-        """Sleep: compare wrong answers with accepted solutions; edit the lessons."""
+        """Sleep: compare wrong answers with correct ones; edit the lessons."""
         call = await self._call(
             self.coordinator,
-            reflection_messages(lessons, cases, max_new),
             "reflect",
+            reflection_messages(lessons, cases, max_new),
             cycle,
         )
         return parse_reflection(call.response, len(lessons)), call

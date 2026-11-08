@@ -9,5 +9,5 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 for model in "$@"; do
   MODEL="$model" scripts/serve_vllm.sh
-  docker exec -w "$REPO" cogarch-exp python -m cli.main calibrate config/pilot.yaml --model "$model"
+  docker exec -w "$REPO" cogarch-exp python -m cli.main calibrate config/general.yaml --model "$model"
 done

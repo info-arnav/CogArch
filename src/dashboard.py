@@ -64,19 +64,26 @@ class RunStore:
         total = cfg["experiment"]["cycles"]
         done = len(report["cycles"])
         current = min(done + 1, total)
-        if report["final_eval"]:
+        is_baseline = run_dir.name == "baseline"
+        if report["final_benchmarks"] or (
+            is_baseline and report["baseline_benchmarks"]
+        ):
             stage = "finished"
+        elif is_baseline:
+            stage = "benchmarking the untrained system"
         elif done == total:
-            stage = "final evaluation"
-        elif not report["baseline_eval"] and cfg["evaluation"]["benchmarks"]:
-            stage = "baseline"
+            stage = "final benchmarks"
+        elif not report["baseline_validation"]:
+            stage = "baseline validation"
         else:
             stage = f"cycle {current}"
         return {
             "name": run_dir.name,
+            "kind": "baseline" if is_baseline else "run",
             "agents": cfg["agents"]["names"],
             "condition": "solo" if len(cfg["agents"]["names"]) == 1 else "pair",
             "model": cfg["model"]["base"],
+            "domains": cfg["data"]["domains"],
             "stage": stage,
             "cycles_done": done,
             "cycles_total": total,
@@ -87,8 +94,8 @@ class RunStore:
             ),
             "rounds_total": cfg["experiment"]["rounds_per_cycle"],
             "baseline_validation": report["baseline_validation"],
-            "baseline_eval": report["baseline_eval"],
-            "final_eval": report["final_eval"],
+            "baseline_benchmarks": report["baseline_benchmarks"],
+            "final_benchmarks": report["final_benchmarks"],
             "cycles": [
                 {k: v for k, v in c.items() if k not in ("reflections", "training")}
                 for c in report["cycles"]
@@ -133,18 +140,25 @@ class RunStore:
                 summaries.append(
                     {
                         "i": i,
-                        "task_id": r["problem"]["task_id"],
-                        "entry_point": r["problem"]["entry_point"],
+                        "task_id": r["task"]["task_id"],
+                        "domain": r["task"]["domain"],
                         "agents": {
                             agent: {
                                 "solved": any(
                                     d["result"]["passed"] for d in res["decisions"]
                                 ),
                                 "attempts": len(res["decisions"]),
-                                "choices": [d["choice"] for d in res["decisions"]],
+                                "answers": [
+                                    (
+                                        d["answer"][:40]
+                                        if r["task"]["kind"] != "code"
+                                        else "code"
+                                    )
+                                    for d in res["decisions"]
+                                ],
                                 "learned_from": (
-                                    r["known_solution"][agent]["found_by"]
-                                    if agent in r["known_solution"]
+                                    r["known"][agent]["found_by"]
+                                    if agent in r["known"]
                                     else None
                                 ),
                             }

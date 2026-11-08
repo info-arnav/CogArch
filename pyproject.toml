@@ -44,6 +44,7 @@ research = [
     "sentence-transformers>=5.0.0",
     "evalplus>=0.3.1",
     "matplotlib>=3.8",
+    "math-verify[antlr4_13_2]>=0.8",
 ]
 dev = [
     "pytest>=8.0.0",
@@ -105,6 +106,8 @@ module = [
     "sentence_transformers",
     "matplotlib",
     "matplotlib.*",
+    "math_verify",
+    "math_verify.*",
 ]
 ignore_missing_imports = true
 

@@ -37,6 +37,9 @@ class AgentsConfig(BaseModel):
     seeds: dict[str, int]
     specialists: list[str] = Field(min_length=1)
     share_discoveries: bool = True
+    discussion: bool = Field(
+        default=True, description="Specialists revise after seeing each other's answers"
+    )
 
     @model_validator(mode="after")
     def _seed_per_agent(self) -> AgentsConfig:
@@ -55,7 +58,11 @@ class EnvironmentConfig(BaseModel):
 
 
 class DataConfig(BaseModel):
-    validation_size: int = Field(default=50, ge=1)
+    domains: list[str] = Field(
+        default_factory=lambda: ["code", "math", "reasoning", "social"],
+        description="Training domains (see src/tasks)",
+    )
+    validation_per_domain: int = Field(default=25, ge=1)
     split_seed: int = 0
 
 
@@ -95,32 +102,50 @@ class MemoryConfig(BaseModel):
 
 
 class EvaluationConfig(BaseModel):
-    samples: int = Field(
-        default=5, ge=1, description="Pass@1 samples per EvalPlus task"
+    benchmarks: list[str] = Field(
+        default_factory=lambda: [
+            "humaneval",
+            "mbpp",
+            "gsm8k",
+            "math500",
+            "arc_challenge",
+            "siqa",
+            "emobench_eu",
+            "emobench_ea",
+        ],
+        description="Held-out benchmarks (see src/tasks.BENCHMARKS); [] to skip",
     )
-    validation_samples: int = Field(default=3, ge=1)
+    max_items: int | None = Field(
+        default=300,
+        description="Fixed subset per benchmark for agent and specialist modes "
+        "(EvalPlus code benchmarks always run in full; plain mode always runs in full)",
+    )
+    subset_seed: int = 0
+    samples: int = Field(default=1, ge=1, description="Answers per task, agent mode")
+    validation_samples: int = Field(default=2, ge=1)
+    specialists: bool = Field(
+        default=True, description="Score each specialist alone with its persona"
+    )
     plain: bool = Field(
         default=True,
-        description="Also score the base model and each fine-tuned specialist alone "
-        "with the official EvalPlus protocol",
-    )
-    benchmarks: list[str] = Field(
-        default_factory=lambda: ["humaneval", "mbpp"],
-        description="EvalPlus datasets, scored at the start and end of a run ([] to skip)",
+        description="Score single models with no persona (base model at the start; "
+        "every fine-tuned specialist at the end), comparable to published scores",
     )
 
     @model_validator(mode="after")
     def _known_benchmarks(self) -> EvaluationConfig:
-        unknown = set(self.benchmarks) - {"humaneval", "mbpp"}
+        from src.tasks import BENCHMARKS
+
+        unknown = set(self.benchmarks) - set(BENCHMARKS)
         if unknown:
-            raise ValueError(f"Unknown EvalPlus benchmarks: {sorted(unknown)}")
+            raise ValueError(f"Unknown benchmarks: {sorted(unknown)}")
         return self
 
 
 class ExperimentConfig(BaseModel):
     name: str
-    cycles: int = Field(default=3, ge=1)
-    rounds_per_cycle: int = Field(default=60, ge=1)
+    cycles: int = Field(default=5, ge=1)
+    rounds_per_cycle: int = Field(default=100, ge=1)
     round_batch_size: int = Field(
         default=4,
         ge=1,

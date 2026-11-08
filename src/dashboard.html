@@ -70,16 +70,20 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&l
 const enc = encodeURIComponent;
 const api = async (path) => { const r = await fetch(path); if (!r.ok) throw new Error(path); return r.json(); };
 const mark = (ok) => ok ? `<span class="ok">✓</span>` : `<span class="no">✗</span>`;
+const mean = (o) => { const v = Object.values(o || {}); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+const delta = (a, b) => (a == null || b == null) ? "" : `${(b - a) * 100 >= 0 ? "+" : ""}${((b - a) * 100).toFixed(1)}`;
+const mainScore = (s) => s == null ? null : (s.plus ?? s.accuracy ?? s.base);
 let timer = null;
 
 // ── overview ────────────────────────────────────────────────────────────────
 function chart(runs) {
   const data = [];
   for (const run of runs) for (const agent of run.agents) {
-    const pts = [{ c: 0, v: run.baseline_validation[agent] }];
-    for (const c of run.cycles) pts.push({ c: c.cycle, v: c.validation_pass_at_1[agent] });
+    const pts = [{ c: 0, v: mean(run.baseline_validation[agent]) }];
+    for (const c of run.cycles) pts.push({ c: c.cycle, v: mean(c.validation[agent]) });
     data.push({ label: `${run.name} · ${agent}`, cond: run.condition, pts: pts.filter(p => p.v != null) });
   }
+  if (!data.length) return `<p class="sub">No runs yet.</p>`;
   const W = Math.max(600, $("app").clientWidth - 70), H = 240, m = { l: 40, r: 12, t: 8, b: 24 };
   const maxC = Math.max(1, ...runs.map(r => r.cycles_total));
   const vals = data.flatMap(s => s.pts.map(p => p.v));
@@ -94,86 +98,102 @@ function chart(runs) {
     g += `<path d="${s.pts.map((p, i) => `${i ? "L" : "M"}${x(p.c)},${y(p.v)}`).join("")}" fill="none" stroke="${col}" stroke-width="2"/>`;
     for (const p of s.pts) g += `<circle cx="${x(p.c)}" cy="${y(p.v)}" r="4" fill="${col}" stroke="var(--surface-1)" stroke-width="2"/><circle cx="${x(p.c)}" cy="${y(p.v)}" r="12" fill="transparent" data-tip="${esc(s.label)}<br>cycle ${p.c}: <b>${pct1(p.v)}</b>"/>`;
   }
-  return `<svg width="${W}" height="${H}" role="img" aria-label="Validation pass rate by cycle">${g}</svg>`;
+  return `<svg width="${W}" height="${H}" role="img" aria-label="Validation accuracy by cycle">${g}</svg>`;
 }
 
-function evalplusTable(runs) {
-  const rows = [];
-  for (const run of runs) for (const agent of run.agents) {
-    const b = run.baseline_eval.find(e => e.agent === agent)?.scores || {}, f = run.final_eval.find(e => e.agent === agent)?.scores || {};
-    for (const bench of Object.keys(b)) for (const kind of ["base", "plus"]) {
-      const label = { humaneval: ["HumanEval", "HumanEval+"], mbpp: ["MBPP", "MBPP+"] }[bench][kind === "base" ? 0 : 1];
-      const s = b[bench]?.[kind], e = f[bench]?.[kind];
-      rows.push(`<tr><td><a href="#/run/${enc(run.name)}">${esc(run.name)}</a></td><td>${agent}</td><td>${label}</td><td class="num">${pct1(s)}</td><td class="num">${pct1(e)}</td><td class="num">${e == null ? "" : ((e - s) * 100 >= 0 ? "+" : "") + ((e - s) * 100).toFixed(1) + " pp"}</td></tr>`);
-    }
-  }
-  return rows.length ? `<table><tr><th>Run</th><th>Agent</th><th>Benchmark</th><th>Start</th><th>End</th><th>Change</th></tr>${rows.join("")}</table>` : `<p class="sub">Appears after each run's baseline evaluation.</p>`;
+function benchTable(entries, title) {
+  if (!entries.length) return "";
+  const benches = Object.keys(entries[0].scores);
+  const head = `<tr><th>System</th><th>Mode</th>${benches.map(b => `<th>${esc(b)}</th>`).join("")}</tr>`;
+  const rows = entries.map(e => `<tr><td>${esc(e.system)}</td><td>${esc(e.mode)}</td>${benches.map(b => {
+    const s = e.scores[b] || {};
+    return `<td class="num">${s.plus != null ? `${pct1(s.base)} / ${pct1(s.plus)}` : pct1(s.accuracy)}</td>`;
+  }).join("")}</tr>`).join("");
+  return `<h3>${esc(title)}</h3><table>${head}${rows}</table><p class="sub">Code benchmarks show base / plus tests.</p>`;
 }
 
 function runCard(run) {
   const last = run.cycles[run.cycles.length - 1];
-  const prog = run.stage === "finished" ? 1 : (run.cycles_done + (run.rounds_done || 0) / run.rounds_total) / run.cycles_total;
+  const prog = run.stage === "finished" ? 1 : run.kind === "baseline" ? 0.5 : (run.cycles_done + (run.rounds_done || 0) / run.rounds_total) / run.cycles_total;
   const kv = (k, v) => `<span>${k}</span><span>${v}</span>`;
   let b = `<div class="kv">` + kv("Stage", esc(run.stage) + (run.rounds_done != null ? ` · ${run.rounds_done}/${run.rounds_total} problems` : "")) + kv("Model", esc(run.model));
   if (last) {
-    b += kv("Solved (last cycle)", run.agents.map(a => `${a}: ${pct(last.solved_rate[a])}`).join(" · "));
-    if (run.condition === "pair") {
-      b += kv("Learned from partner", run.agents.map(a => `${a}: ${last.learned_from_peer[a] ?? 0}`).join(" · "));
-      b += kv("Answers differ", `${pct(last.code_divergence)} code · ${pct(last.outcome_disagreement)} verdict`);
-    }
-    b += kv("Validation", run.agents.map(a => `${a}: ${pct1(last.validation_pass_at_1[a])}`).join(" · "));
+    b += kv("Solved (last cycle)", run.agents.map(a => `${a}: ${pct(mean(last.solved_rate[a]))}`).join(" · "));
+    if (run.condition === "pair") b += kv("Learned from partner", run.agents.map(a => `${a}: ${last.learned_from_peer[a] ?? 0}`).join(" · "));
+    b += kv("Discussion changed / fixed", run.agents.map(a => `${a}: ${pct(last.discussion_changed[a])} / ${pct(last.discussion_fixed[a])}`).join(" · "));
+    b += kv("Validation", run.agents.map(a => `${a}: ${pct1(mean(last.validation[a]))}`).join(" · "));
   }
   b += `</div><details><summary>Log</summary><pre>${esc(run.log.join("\n"))}</pre></details>`;
-  return `<section class="panel"><h2><a href="#/run/${enc(run.name)}">${esc(run.name)}</a> <span class="tag">${run.condition}</span></h2><div class="bar"><div style="width:${(100 * prog).toFixed(0)}%"></div></div>${b}</section>`;
+  const tag = run.kind === "baseline" ? "untrained" : run.condition;
+  return `<section class="panel"><h2><a href="#/run/${enc(run.name)}">${esc(run.name)}</a> <span class="tag">${tag}</span></h2><div class="bar"><div style="width:${(100 * prog).toFixed(0)}%"></div></div>${b}</section>`;
 }
 
 async function overview() {
-  const runs = await api("/api/runs");
-  $("app").innerHTML = `<h1>CogArch Live</h1><p class="sub">Two agents teaching each other vs one agent alone · refreshes every 15s · ${new Date().toLocaleTimeString()}</p>
-    <section class="panel"><h2>Validation Pass@1 by cycle (cycle 0 = untrained)</h2>
+  const all = await api("/api/runs");
+  const runs = all.filter(r => r.kind === "run"), base = all.find(r => r.kind === "baseline");
+  let bench = base && base.baseline_benchmarks.length ? benchTable(base.baseline_benchmarks, "Untrained system (baseline)") : `<p class="sub">Baseline benchmarks appear after <code>cogarch baseline</code>.</p>`;
+  for (const r of runs) if (r.final_benchmarks.length) bench += benchTable(r.final_benchmarks, `After training: ${r.name}`);
+  $("app").innerHTML = `<h1>CogArch Live</h1><p class="sub">Brain-like agents learning from "wrong" across domains · two together vs one alone · refreshes every 15s · ${new Date().toLocaleTimeString()}</p>
+    <section class="panel"><h2>Validation accuracy by cycle (mean over domains; cycle 0 = untrained)</h2>
       <div class="legend"><span><span class="swatch" style="background:var(--pair)"></span>Pair (one line per agent)</span><span><span class="swatch" style="background:var(--solo)"></span>Solo</span></div>
-      ${runs.length ? chart(runs) : `<p class="sub">No runs yet.</p>`}</section>
-    <section class="panel"><h2>EvalPlus Pass@1 (start → end)</h2>${evalplusTable(runs)}</section>
-    <div class="grid">${runs.map(runCard).join("")}</div>`;
+      ${chart(runs)}</section>
+    <section class="panel"><h2>Benchmarks</h2>${bench}</section>
+    <div class="grid">${all.map(runCard).join("")}</div>`;
   timer = setTimeout(route, 15000);
 }
 
 // ── one run ─────────────────────────────────────────────────────────────────
-function callView(call, open = false) {
+function callView(call, label = "") {
   const msgs = call.messages.map(m => `<div class="msg"><div class="role">${esc(m.role)}</div><pre>${esc(m.content)}</pre></div>`).join("");
-  return `<details${open ? " open" : ""}><summary><b>${esc(call.role)}</b> · ${esc(call.model)} · T=${call.temperature} · seed ${call.seed}</summary>
+  return `<details><summary>${label}<b>${esc(call.role)}</b> · ${esc(call.stage)} · ${esc(call.model)} · T=${call.temperature}</summary>
     ${msgs}<div class="msg"><div class="role">response</div><pre>${esc(call.response)}</pre></div></details>`;
 }
 
-async function runPage(name) {
-  const d = await api(`/api/run?name=${enc(name)}`), r = d.report, o = d.overview, agents = o.agents;
-  let h = `<div class="crumbs"><a href="#/">Overview</a> › ${esc(name)}</div><h1>${esc(name)} <span class="tag">${o.condition}</span></h1>
-    <p class="sub">${esc(o.model)} · ${esc(o.stage)}${o.rounds_done != null ? ` · ${o.rounds_done}/${o.rounds_total} problems` : ""}</p>`;
-  const plainRows = [];
-  for (const [bench, sc] of Object.entries(r.baseline_plain || {})) for (const kind of ["base", "plus"]) {
-    const label = { humaneval: ["HumanEval", "HumanEval+"], mbpp: ["MBPP", "MBPP+"] }[bench][kind === "base" ? 0 : 1];
-    plainRows.push(`<tr><td>${label}</td><td>base model</td><td class="num">${pct1(sc[kind])}</td><td></td></tr>`);
-    for (const [who, s2] of Object.entries(r.final_plain || {})) {
-      const v = s2[bench]?.[kind];
-      plainRows.push(`<tr><td>${label}</td><td>fine-tuned ${esc(who)}</td><td class="num">${pct1(v)}</td><td class="num">${v == null ? "" : ((v - sc[kind]) * 100 >= 0 ? "+" : "") + ((v - sc[kind]) * 100).toFixed(1) + " pp"}</td></tr>`);
-    }
+function specialisationTable(start, latest, records, domains, specialists) {
+  let h = `<table><tr><th>Specialist</th>${domains.map(d => `<th>${esc(d)}: start → now</th>`).join("")}</tr>`;
+  for (const s of specialists) {
+    h += `<tr><td>${esc(s)}</td>${domains.map(d => {
+      const a = start?.[s]?.[d], b = latest?.[s]?.[d];
+      // Same rule as DomainRecords.owner: highest record, ties to the earlier specialist.
+      const owner = records ? specialists.reduce((best, o) => ((records[o]?.[d] ?? 0.5) > (records[best]?.[d] ?? 0.5) ? o : best), specialists[0]) : null;
+      return `<td class="num">${pct(a)} → ${pct(b)} <span class="tag">${delta(a, b)}</span>${owner === s ? " <b title='highest running record in this domain'>owner</b>" : ""}</td>`;
+    }).join("")}</tr>`;
   }
-  if (plainRows.length) h += `<section class="panel"><h2>Single models, official EvalPlus protocol</h2><table><tr><th>Benchmark</th><th>Model</th><th>Pass@1</th><th>vs base</th></tr>${plainRows.join("")}</table></section>`;
-  h += `<section class="panel"><h2>Cycles</h2><table><tr><th>Cycle</th><th>Problems</th>${agents.map(a => `<th>Agent ${a}: solved · from partner · validation</th>`).join("")}<th>Differ (code / verdict)</th><th>Rolled back</th></tr>
-    <tr><td>0</td><td></td>${agents.map(a => `<td class="num">validation ${pct1(r.baseline_validation[a])}</td>`).join("")}<td></td><td></td></tr>`;
-  for (const c of r.cycles) h += `<tr><td>${c.cycle}</td><td><a href="#/run/${enc(name)}/c/${c.cycle}">browse ${c.rounds}</a></td>${agents.map(a => `<td class="num">${pct(c.solved_rate[a])} · ${c.learned_from_peer[a] ?? 0} · ${pct1(c.validation_pass_at_1[a])}</td>`).join("")}<td class="num">${pct(c.code_divergence)} / ${pct(c.outcome_disagreement)}</td><td>${c.rolled_back.join(", ") || "–"}</td></tr>`;
-  const running = d.round_cycles.filter(c => c > r.cycles.length);
-  for (const c of running) h += `<tr><td>${c}</td><td><a href="#/run/${enc(name)}/c/${c}">browse (in progress)</a></td><td colspan="${agents.length + 2}"></td></tr>`;
+  return h + `</table>`;
+}
+
+async function runPage(name) {
+  const d = await api(`/api/run?name=${enc(name)}`), r = d.report, o = d.overview, agents = o.agents, domains = o.domains;
+  let h = `<div class="crumbs"><a href="#/">Overview</a> › ${esc(name)}</div><h1>${esc(name)} <span class="tag">${o.kind === "baseline" ? "untrained" : o.condition}</span></h1>
+    <p class="sub">${esc(o.model)} · ${esc(o.stage)}${o.rounds_done != null ? ` · ${o.rounds_done}/${o.rounds_total} problems` : ""} · domains: ${domains.map(esc).join(", ")}</p>`;
+  if (r.baseline_benchmarks.length) h += `<section class="panel">${benchTable(r.baseline_benchmarks, "Benchmarks: untrained system")}</section>`;
+  if (r.final_benchmarks.length) h += `<section class="panel">${benchTable(r.final_benchmarks, "Benchmarks: after training")}</section>`;
+  if (o.kind === "baseline") { $("app").innerHTML = h; return; }
+
+  const last = r.cycles[r.cycles.length - 1];
+  const specs = Object.keys((r.baseline_validation_specialists[agents[0]] || {}));
+  h += `<section class="panel"><h2>Specialisation: each specialist alone, validation accuracy by domain</h2><p class="sub">"owner" = highest running record in that domain (decides who learns when nobody was right).</p>`;
+  for (const a of agents) h += `<h3>Agent ${esc(a)}</h3>` + specialisationTable(r.baseline_validation_specialists[a], last?.validation_specialists[a], last?.domain_records[a], domains, specs);
+  h += `</section>`;
+
+  h += `<section class="panel"><h2>Whole agent, validation accuracy by domain</h2><table><tr><th>Cycle</th>${agents.map(a => domains.map(dm => `<th>${a}: ${esc(dm)}</th>`).join("")).join("")}</tr>
+    <tr><td>0</td>${agents.map(a => domains.map(dm => `<td class="num">${pct(r.baseline_validation[a]?.[dm])}</td>`).join("")).join("")}</tr>`;
+  for (const c of r.cycles) h += `<tr><td>${c.cycle}</td>${agents.map(a => domains.map(dm => `<td class="num">${pct(c.validation[a]?.[dm])}</td>`).join("")).join("")}</tr>`;
+  h += `</table></section>`;
+
+  h += `<section class="panel"><h2>Cycles</h2><table><tr><th>Cycle</th><th>Problems</th>${agents.map(a => `<th>${a}: solved · from partner · discussion changed / fixed</th>`).join("")}<th>Answers differ / verdicts differ</th><th>Rolled back</th></tr>`;
+  for (const c of r.cycles) h += `<tr><td>${c.cycle}</td><td><a href="#/run/${enc(name)}/c/${c.cycle}">browse ${c.rounds}</a></td>${agents.map(a => `<td class="num">${pct(mean(c.solved_rate[a]))} · ${c.learned_from_peer[a] ?? 0} · ${pct(c.discussion_changed[a])} / ${pct(c.discussion_fixed[a])}</td>`).join("")}<td class="num">${pct(c.answer_divergence)} / ${pct(c.outcome_disagreement)}</td><td>${c.rolled_back.join(", ") || "–"}</td></tr>`;
+  for (const c of d.round_cycles.filter(c => c > r.cycles.length)) h += `<tr><td>${c}</td><td><a href="#/run/${enc(name)}/c/${c}">browse (in progress)</a></td><td colspan="${agents.length + 2}"></td></tr>`;
   h += `</table></section>`;
 
   for (const c of [...r.cycles].reverse()) {
-    h += `<section class="panel"><h2>Cycle ${c.cycle} · sleep</h2>`;
-    h += `<h3>Training (DPO + NLL, per part of each brain)</h3><table><tr><th>Agent</th><th>Part</th><th>Pairs</th><th>Pairs from partner</th><th>Steps</th><th>Final loss</th><th>Reward accuracy</th><th>Reward margin</th><th></th></tr>`;
+    h += `<section class="panel"><h2>Cycle ${c.cycle} · sleep</h2><h3>Who learned what (competition: winners, or the domain owner if nobody was right)</h3>
+      <table><tr><th>Agent</th><th>Part</th><th>Pairs</th><th>By domain</th><th>Steps</th><th>Final loss</th><th>Reward accuracy</th><th>Reward margin</th><th></th></tr>`;
     for (const a of agents) {
       const pairs = c.preference_pairs[a] || {}, tr = (c.training || {})[a] || {};
       for (const role of Object.keys(pairs)) {
-        const t = tr[role];
-        h += `<tr><td>${a}</td><td>${role}</td><td class="num">${pairs[role]}</td><td class="num">${role === Object.keys(pairs)[0] ? Object.entries(c.pair_sources[a] || {}).map(([s, n]) => `${s}: ${n}`).join(", ") : ""}</td>
+        const t = tr[role], byd = (c.pairs_by_domain[a] || {})[role] || {};
+        h += `<tr><td>${a}</td><td>${role}</td><td class="num">${pairs[role]}</td><td>${Object.entries(byd).map(([k, v]) => `${esc(k)} ${v}`).join(", ")}</td>
           <td class="num">${t ? t.steps : "not trained"}</td><td class="num">${t ? num(t.loss) : ""}</td><td class="num">${t ? pct(t.reward_accuracy) : ""}</td><td class="num">${t ? num(t.reward_margin) : ""}</td>
           <td>${pairs[role] ? `<a href="#/run/${enc(name)}/pairs/${a}/${role}/${c.cycle}">pairs</a>` : ""}</td></tr>`;
       }
@@ -183,7 +203,7 @@ async function runPage(name) {
       h += `<b>Agent ${a}</b><ul>${(c.lessons[a] || []).map(l => `<li>${esc(l)}</li>`).join("") || "<li>–</li>"}</ul>`;
       if ((c.reflections || {})[a]) h += callView(c.reflections[a]);
     }
-    h += `<h3>Coordinator choices (first attempts)</h3>${agents.map(a => `${a}: ${Object.entries(c.coordinator_choices[a] || {}).map(([k, v]) => `${esc(k)} ${v}`).join(" · ")}`).join("<br>")}</section>`;
+    h += `</section>`;
   }
   h += `<section class="panel"><h2>Log</h2><pre>${esc(d.log.join("\n"))}</pre></section>`;
   $("app").innerHTML = h;
@@ -194,35 +214,35 @@ async function roundsPage(name, cycle) {
   const rows = await api(`/api/rounds?name=${enc(name)}&cycle=${cycle}`);
   const agents = rows.length ? Object.keys(rows[0].agents) : [];
   let h = `<div class="crumbs"><a href="#/">Overview</a> › <a href="#/run/${enc(name)}">${esc(name)}</a> › cycle ${cycle}</div><h1>Cycle ${cycle}: ${rows.length} problems</h1>
-    <section class="panel"><table><tr><th>#</th><th>Problem</th>${agents.map(a => `<th>Agent ${a}</th>`).join("")}</tr>`;
-  for (const r of rows) h += `<tr><td>${r.i + 1}</td><td><a href="#/run/${enc(name)}/c/${cycle}/r/${r.i}">${esc(r.task_id)}</a> <span class="tag">${esc(r.entry_point)}</span></td>${agents.map(a => {
+    <section class="panel"><table><tr><th>#</th><th>Domain</th><th>Problem</th>${agents.map(a => `<th>Agent ${a}</th>`).join("")}</tr>`;
+  for (const r of rows) h += `<tr><td>${r.i + 1}</td><td>${esc(r.domain)}</td><td><a href="#/run/${enc(name)}/c/${cycle}/r/${r.i}">${esc(r.task_id)}</a></td>${agents.map(a => {
     const s = r.agents[a];
-    return `<td>${mark(s.solved)} ${s.attempts} attempt${s.attempts > 1 ? "s" : ""} · chose ${s.choices.map(c => esc(c ?? "none")).join(" → ")}${s.learned_from && s.learned_from !== a ? ` · <b>learned from ${esc(s.learned_from)}</b>` : ""}</td>`;
+    return `<td>${mark(s.solved)} ${s.attempts} attempt${s.attempts > 1 ? "s" : ""} · answered ${s.answers.map(esc).join(" → ")}${s.learned_from && s.learned_from !== a ? ` · <b>learned from ${esc(s.learned_from)}</b>` : ""}</td>`;
   }).join("")}</tr>`;
   $("app").innerHTML = h + `</table></section>`;
   timer = setTimeout(route, 30000);
 }
 
 async function roundPage(name, cycle, i) {
-  const r = await api(`/api/round?name=${enc(name)}&cycle=${cycle}&i=${i}`);
-  let h = `<div class="crumbs"><a href="#/">Overview</a> › <a href="#/run/${enc(name)}">${esc(name)}</a> › <a href="#/run/${enc(name)}/c/${cycle}">cycle ${cycle}</a> › ${esc(r.problem.task_id)}
+  const r = await api(`/api/round?name=${enc(name)}&cycle=${cycle}&i=${i}`), t = r.task;
+  const hidden = t.kind === "code" ? [t.setup_code, ...t.tests].filter(Boolean).join("\n") : `Correct answer: ${t.answer}`;
+  let h = `<div class="crumbs"><a href="#/">Overview</a> › <a href="#/run/${enc(name)}">${esc(name)}</a> › <a href="#/run/${enc(name)}/c/${cycle}">cycle ${cycle}</a> › ${esc(t.task_id)}
     · <a href="#/run/${enc(name)}/c/${cycle}/r/${Math.max(0, i - 1)}">‹ prev</a> · <a href="#/run/${enc(name)}/c/${cycle}/r/${i + 1}">next ›</a></div>
-    <h1>${esc(r.problem.task_id)}</h1>
-    <section class="panel"><h2>Problem (what agents see)</h2><pre>${esc(r.problem.prompt)}</pre>
-    <details><summary>Hidden tests (held by the environment, never shown to agents)</summary><pre>${esc([r.problem.setup_code, ...r.problem.tests].filter(Boolean).join("\n"))}</pre></details></section>`;
+    <h1>${esc(t.task_id)} <span class="tag">${esc(t.domain)}</span></h1>
+    <section class="panel"><h2>Problem (what agents see)</h2><pre>${esc(t.prompt)}${t.choices.length ? "\n\n" + t.choices.map((c, k) => `${"ABCDEFGHIJ"[k]}. ${c}`).join("\n") : ""}</pre>
+    <details><summary>Held by the environment, never shown to agents</summary><pre>${esc(hidden)}</pre></details></section>`;
   for (const [agent, res] of Object.entries(r.results)) {
-    const known = r.known_solution[agent];
+    const known = r.known[agent], correct = r.correct[agent] || {};
     h += `<section class="panel"><h2>Agent ${esc(agent)} ${mark(res.decisions.some(d => d.result.passed))}</h2>`;
-    if (known) h += `<p>Knows an accepted solution, found by <b>${known.found_by === agent ? "itself" : "agent " + esc(known.found_by)}</b>.</p><details><summary>Accepted solution</summary><pre>${esc(known.code)}</pre></details>`;
+    if (known) h += `<p>Knows a correct answer, found by <b>${known.found_by === agent ? "itself" : "agent " + esc(known.found_by)}</b>.</p>`;
     for (const d of res.decisions) {
-      h += `<div class="attempt"><b>Attempt ${d.attempt_number}</b> — coordinator ${d.choice ? (d.choice === "combined" ? "combined proposals" : "chose <b>" + esc(d.choice) + "</b>") : "gave no valid decision"} —
+      const label = (stage, role) => { const v = correct[`${d.attempt_number}:${stage}:${role}`]; return v == null ? "" : (v ? `<span class="ok">right</span> · ` : `<span class="no">wrong</span> · `); };
+      h += `<div class="attempt"><b>Attempt ${d.attempt_number}</b> — final answer <code>${esc(t.kind === "code" ? "(code)" : d.answer)}</code> —
         world: ${d.result.passed ? `<span class="ok">accepted</span>` : `<span class="no">${esc(d.result.feedback)}</span>`}
-        <span class="tag">env: ${d.result.tests_passed}/${d.result.tests_total} tests${d.result.error_types.length ? " · " + esc(d.result.error_types.join(", ")) : ""}</span>
-        <details><summary>Submitted code</summary><pre>${esc(d.code)}</pre></details>
-        <h3>Calls to each part of the brain</h3>${(d.calls || []).map(c => {
-          const verdict = (r.agreement[agent] || {})[`${d.attempt_number}:${c.role}`];
-          return (verdict == null ? "" : `<div class="role">${verdict ? "behaves like the accepted solution" : "behaves differently from the accepted solution"}</div>`) + callView(c);
-        }).join("")}</div>`;
+        ${t.kind === "code" ? `<span class="tag">env: ${d.result.tests_passed}/${d.result.tests_total} tests</span>` : ""}
+        <h3>1 · Each specialist alone</h3>${d.calls.filter(c => c.stage === "round1").map(c => callView(c, label(1, c.role))).join("")}
+        <h3>2 · Discussion</h3>${d.calls.filter(c => c.stage === "round2").map(c => callView(c, label(2, c.role))).join("") || "<p class='sub'>(discussion off)</p>"}
+        <h3>3 · Coordinator decides</h3>${d.calls.filter(c => c.stage === "decide").map(c => callView(c)).join("")}</div>`;
     }
     if (r.probe_calls && r.probe_calls[agent]) h += `<h3>Credit assignment: example calls the agent wrote</h3><pre>${esc((r.probes[agent] || []).join("\n") || "(none parsed)")}</pre>${callView(r.probe_calls[agent])}`;
     h += `</section>`;

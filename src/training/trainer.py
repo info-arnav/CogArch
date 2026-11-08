@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from src.config import TrainingConfig
-from src.models.code import PreferencePair
+from src.models.core import PreferencePair
 from src.training.dpo_job import DPOJob
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]

@@ -1,41 +1,68 @@
-"""The full run: baseline → (compete → sleep → validate) × cycles → final eval."""
+"""The full run: (compete → sleep → validate) × cycles → final benchmarks.
+
+Benchmarks of the untrained system are identical for every run, so they are
+measured once with `baseline()` (cli: `cogarch baseline`) rather than in each run.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import itertools
 import time
-from collections import Counter
+from collections import Counter, defaultdict
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from rich.console import Console
 
 from src.config import Config
-from src.eval import evalplus_eval
-from src.eval.benchmarks import mbpp
+from src.environment import Environment
+from src.eval import scoring
 from src.execution.sandbox import Sandbox
 from src.inference.agent import Agent, Role, derive_seed
 from src.inference.client import InferenceClient
 from src.inference.prompts import load_coordinator, load_specialist
 from src.memory.controller import AgentMemory
 from src.memory.embedder import Embedder, SentenceTransformerEmbedder
-from src.models.code import (
-    CodeProblem,
+from src.models.core import (
+    BenchmarkScores,
     CycleMetrics,
-    EvalScore,
     ExperimentReport,
     RoundResult,
+    Task,
 )
+from src.tasks import BENCHMARKS, EVALPLUS_BENCHMARKS, Curriculum, benchmark_subset
 from src.training.community import play_round, remember_round
-from src.training.preferences import build_pairs
+from src.training.preferences import (
+    COORDINATOR,
+    DomainRecords,
+    build_pairs,
+    discussion_stats,
+    specialist_accuracy,
+)
 from src.training.registry import AdapterRegistry, AdapterVersion
 from src.training.trainer import make_job, run_jobs, training_summary, write_dataset
 
 MAX_CASES_PER_REFLECTION = 8
 
 
-def _normalise(code: str) -> str:
-    return "\n".join(line.rstrip() for line in code.strip().splitlines())
+@dataclass
+class ValidationResult:
+    whole: dict[str, dict[str, float]] = field(default_factory=dict)
+    specialists: dict[str, dict[str, dict[str, float]]] = field(default_factory=dict)
+    divergence: float | None = None
+    disagreement: float | None = None
+
+
+def _solo(agent: Agent, specialist: str) -> scoring.Answerer:
+    async def answer(task: Task, sample: int) -> str:
+        return await agent.solo_answer(specialist, task, sample)
+
+    return answer
+
+
+def _normalise(answer: str) -> str:
+    return "\n".join(line.rstrip() for line in answer.strip().splitlines())
 
 
 class Experiment:
@@ -53,21 +80,21 @@ class Experiment:
             cfg.environment.execution_timeout_seconds,
             cfg.environment.memory_limit_mb,
         )
+        self.environment = Environment(self.sandbox, cfg.environment.feedback)
         self.registry = AdapterRegistry(self.run_dir / "adapters" / "registry.json")
         self.specialist_personas = {
             n: load_specialist(n) for n in cfg.agents.specialists
         }
         self.coordinator_persona = load_coordinator()
         self.agents: dict[str, Agent] = {}
-        # Adapter names must be unique on the shared vLLM server, including
-        # across reruns of the same experiment name.
+        self.records: dict[str, DomainRecords] = {}
         self.session = format(int(time.time()), "x")
 
     # ── setup ────────────────────────────────────────────────────────────────
 
-    def _build_agents(self) -> None:
+    def _build_agents(self, with_memory: bool = True) -> None:
         embedder: Embedder | None = None
-        if self.cfg.memory.enabled:
+        if with_memory and self.cfg.memory.enabled:
             embedder = SentenceTransformerEmbedder(self.cfg.memory.embedding_model)
         base = self.cfg.model.served_name
         for name in self.cfg.agents.names:
@@ -91,122 +118,165 @@ class Experiment:
                 },
                 coordinator=Role(self.coordinator_persona, base),
                 client=self.client,
-                sandbox=self.sandbox,
+                environment=self.environment,
                 memory=memory,
                 max_attempts=self.cfg.environment.max_attempts,
                 max_tokens=self.cfg.model.max_tokens,
                 probes_per_problem=self.cfg.environment.probes_per_problem,
+                discussion=self.cfg.agents.discussion,
             )
+            self.records[name] = DomainRecords(list(self.specialist_personas))
 
-    def _load_data(self) -> tuple[list[CodeProblem], list[CodeProblem]]:
-        train, validation = mbpp.split(
-            mbpp.load_pool(), self.cfg.data.validation_size, self.cfg.data.split_seed
+    def _curriculum(self) -> Curriculum:
+        return Curriculum(
+            self.cfg.data.domains,
+            self.cfg.data.validation_per_domain,
+            self.cfg.experiment.rounds_per_cycle,
+            self.cfg.experiment.cycles,
+            self.cfg.data.split_seed,
         )
-        needed = self.cfg.experiment.cycles * self.cfg.experiment.rounds_per_cycle
-        if needed > len(train):
-            raise ValueError(
-                f"{needed} training problems needed but only {len(train)} available"
-            )
-        return train, validation
 
     # ── measurement ──────────────────────────────────────────────────────────
 
-    async def _validate(
-        self, problems: list[CodeProblem]
-    ) -> tuple[dict[str, float], float | None, float | None]:
-        """Pass@1 per agent (averaged over samples), plus how much the agents'
-        answers differ (on the first sample)."""
-        names = list(self.agents)
-        k = self.cfg.evaluation.validation_samples
-        jobs = [(n, p, s) for n in names for p in problems for s in range(k)]
-        codes = await asyncio.gather(*(self.agents[n].answer(p, s) for n, p, s in jobs))
+    async def _accuracy(
+        self, answerer: scoring.Answerer, tasks: list[Task], samples: int
+    ) -> tuple[dict[str, float], dict[tuple[str, int], tuple[str, bool]]]:
+        """Per-domain accuracy and (task, sample) -> (answer, correct)."""
+        jobs = [(t, i) for t in tasks for i in range(samples)]
+        answers = await asyncio.gather(*(answerer(t, i) for t, i in jobs))
         verdicts = await asyncio.gather(
-            *(self.sandbox.run_tests(code, p) for code, (_, p, _) in zip(codes, jobs))
+            *(self.environment.judge(t, a) for (t, _), a in zip(jobs, answers))
         )
-        passed: dict[str, dict[tuple[str, int], bool]] = {n: {} for n in names}
-        first_code: dict[str, dict[str, str]] = {n: {} for n in names}
-        for (n, p, s), code, v in zip(jobs, codes, verdicts):
-            passed[n][(p.task_id, s)] = v.passed
-            if s == 0:
-                first_code[n][p.task_id] = code
-        scores = {n: sum(ok.values()) / len(ok) for n, ok in passed.items()}
-        if len(names) < 2:
-            return scores, None, None
-        pairs = list(itertools.combinations(names, 2))
-        ids = [p.task_id for p in problems]
-        divergence = sum(
-            _normalise(first_code[a][t]) != _normalise(first_code[b][t])
-            for a, b in pairs
-            for t in ids
-        ) / (len(pairs) * len(ids))
-        disagreement = sum(
-            passed[a][(t, 0)] != passed[b][(t, 0)] for a, b in pairs for t in ids
-        ) / (len(pairs) * len(ids))
-        return scores, divergence, disagreement
+        by_domain: dict[str, list[bool]] = defaultdict(list)
+        detail: dict[tuple[str, int], tuple[str, bool]] = {}
+        for (t, i), a, v in zip(jobs, answers, verdicts):
+            by_domain[t.domain].append(v.passed)
+            detail[(t.task_id, i)] = (a, v.passed)
+        return {d: sum(v) / len(v) for d, v in by_domain.items()}, detail
 
-    async def _evalplus(self, stage: str) -> list[EvalScore]:
-        scores = []
+    async def _validate(self, tasks: list[Task]) -> ValidationResult:
+        """Whole-agent and solo-specialist accuracy per domain, and how much the
+        agents' answers differ."""
+        k = self.cfg.evaluation.validation_samples
+        result = ValidationResult()
+        details = {}
         for name, agent in self.agents.items():
-            score = EvalScore(agent=name)
-            for benchmark in self.cfg.evaluation.benchmarks:
-                self.console.print(f"  EvalPlus {benchmark} · agent {name} ({stage})")
-                score.scores[benchmark] = await evalplus_eval.evaluate(
-                    agent,
-                    benchmark,
-                    self.run_dir / "evalplus" / stage,
-                    self.cfg.evaluation.samples,
+            result.whole[name], details[name] = await self._accuracy(
+                agent.answer, tasks, k
+            )
+            result.specialists[name] = {}
+            for s in agent.specialists:
+                result.specialists[name][s], _ = await self._accuracy(
+                    _solo(agent, s), tasks, 1
                 )
-            scores.append(score)
-        return scores
-
-    async def _plain(self, model: str, label: str) -> dict[str, dict[str, float]]:
-        scores = {}
-        for benchmark in self.cfg.evaluation.benchmarks:
-            self.console.print(
-                f"  EvalPlus {benchmark} · {label} alone (official protocol)"
+        names = list(self.agents)
+        if len(names) > 1:
+            pairs = list(itertools.combinations(names, 2))
+            keys = [(t.task_id, 0) for t in tasks]
+            n = len(pairs) * len(keys)
+            result.divergence = (
+                sum(
+                    _normalise(details[a][key][0]) != _normalise(details[b][key][0])
+                    for a, b in pairs
+                    for key in keys
+                )
+                / n
             )
-            scores[benchmark] = await evalplus_eval.evaluate_plain(
-                self.client,
-                model,
-                benchmark,
-                self.run_dir
-                / "evalplus"
-                / "plain"
-                / f"{benchmark}_{label.replace('/', '_')}.jsonl",
-                self.cfg.model.max_tokens,
+            result.disagreement = (
+                sum(
+                    details[a][key][1] != details[b][key][1]
+                    for a, b in pairs
+                    for key in keys
+                )
+                / n
             )
-        return scores
+        return result
 
-    # ── waking: competition ──────────────────────────────────────────────────
+    async def _benchmarks(self, stage: str, agents: list[str]) -> list[BenchmarkScores]:
+        ev = self.cfg.evaluation
+        out_dir = self.run_dir / "benchmarks" / stage
+        results: list[BenchmarkScores] = []
 
-    async def _compete(
-        self, cycle: int, problems: list[CodeProblem]
-    ) -> list[RoundResult]:
+        async def run(
+            system: str, mode: str, answerer: scoring.Answerer, samples: int, full: bool
+        ) -> None:
+            entry = BenchmarkScores(system=system, mode=mode)
+            for bench in ev.benchmarks:
+                tasks = BENCHMARKS[bench]()
+                if not full and bench not in EVALPLUS_BENCHMARKS:
+                    tasks = benchmark_subset(tasks, ev.max_items, ev.subset_seed)
+                self.console.print(
+                    f"  {stage} · {mode} · {system} · {bench} ({len(tasks)})"
+                )
+                entry.scores[bench] = await scoring.score(
+                    bench,
+                    tasks,
+                    answerer,
+                    samples,
+                    out_dir / mode / system.replace("/", "_") / f"{bench}.jsonl",
+                )
+            results.append(entry)
+
+        for name in agents:
+            agent = self.agents[name]
+            await run(f"agent {name}", "agent", agent.answer, ev.samples, full=False)
+            if ev.specialists:
+                for s in agent.specialists:
+                    await run(
+                        f"{name}/{s}", "specialist", _solo(agent, s), 1, full=False
+                    )
+        if ev.plain:
+            models = (
+                {"base": self.cfg.model.served_name}
+                if stage == "baseline"
+                else {
+                    f"{name}/{s}": role.model
+                    for name in agents
+                    for s, role in self.agents[name].specialists.items()
+                    if role.model != self.cfg.model.served_name
+                }
+            )
+            for system, model in models.items():
+                await run(
+                    system,
+                    "plain",
+                    scoring.plain_answerer(
+                        self.client, model, self.cfg.model.max_tokens
+                    ),
+                    1,
+                    full=True,
+                )
+        return results
+
+    # ── waking ───────────────────────────────────────────────────────────────
+
+    async def _compete(self, cycle: int, tasks: list[Task]) -> list[RoundResult]:
         rounds: list[RoundResult] = []
         log = self.run_dir / "rounds" / f"cycle_{cycle}.jsonl"
         log.parent.mkdir(parents=True, exist_ok=True)
         size = self.cfg.experiment.round_batch_size
         with open(log, "w") as f:
-            for start in range(0, len(problems), size):
-                batch = problems[start : start + size]
+            for start in range(0, len(tasks), size):
+                batch = tasks[start : start + size]
                 results = await asyncio.gather(
                     *(
                         play_round(
                             self.agents,
-                            p,
+                            t,
                             cycle,
                             self.sandbox,
                             self.cfg.agents.share_discoveries,
                         )
-                        for p in batch
+                        for t in batch
                     )
                 )
                 for r in results:
                     for agent in self.agents.values():
                         await remember_round(agent, r)
                     f.write(r.model_dump_json() + "\n")
+                    f.flush()
                 rounds.extend(results)
-                self.console.print(f"    {len(rounds)}/{len(problems)} problems")
+                self.console.print(f"    {len(rounds)}/{len(tasks)} problems")
         return rounds
 
     # ── sleep ────────────────────────────────────────────────────────────────
@@ -214,17 +284,15 @@ class Experiment:
     async def _reflect(
         self, cycle: int, rounds: list[RoundResult], metrics: CycleMetrics
     ) -> None:
-        """Sleep, part 1: compare wrong answers with the solutions later accepted
-        and edit the lesson list (ExpeL-style ADD / AGREE / DISAGREE / EDIT)."""
-        banned = {r.problem.entry_point for r in rounds} | {
-            r.problem.task_id for r in rounds
+        banned = {r.task.entry_point for r in rounds if r.task.entry_point} | {
+            r.task.task_id for r in rounds
         }
         for name, agent in self.agents.items():
             if agent.memory is None:
                 continue
             cases: list[str] = []
             for r in rounds:
-                known = r.known_solution.get(name)
+                known = r.known.get(name)
                 wrong = [d for d in r.results[name].decisions if not d.result.passed]
                 if known is None or not wrong:
                     continue
@@ -232,10 +300,9 @@ class Experiment:
                     "your team" if known.found_by == name else f"agent {known.found_by}"
                 )
                 cases.append(
-                    f"### Case {len(cases) + 1}\nProblem:\n{r.problem.prompt}\n"
-                    f"Your team's wrong answer:\n```python\n{wrong[-1].code}\n```\n"
-                    f"Accepted solution (found by {source}):\n"
-                    f"```python\n{known.code}\n```"
+                    f"### Case {len(cases) + 1} ({r.task.domain})\nProblem:\n{r.task.prompt}\n"
+                    f"Your team's wrong answer:\n{wrong[-1].coordinator_output[:1500]}\n"
+                    f"Correct answer (found by {source}):\n{known.response[:1500]}"
                 )
             cases = cases[-MAX_CASES_PER_REFLECTION:]
             if cases:
@@ -256,14 +323,20 @@ class Experiment:
     async def _train(
         self, cycle: int, rounds: list[RoundResult], metrics: CycleMetrics
     ) -> list[tuple[str, str]]:
-        """Fine-tune every role with enough pairs; returns the (agent, role)s updated."""
         jobs = {}
         for name, agent in self.agents.items():
-            pairs = build_pairs(rounds, name, self.specialist_personas)
+            pairs = build_pairs(rounds, name, self.records[name])
+            metrics.domain_records[name] = self.records[name].snapshot()
             metrics.preference_pairs[name] = {role: len(p) for role, p in pairs.items()}
+            metrics.pairs_by_domain[name] = {
+                role: dict(Counter(pair.domain for pair in p))
+                for role, p in pairs.items()
+            }
             metrics.pair_sources[name] = dict(
                 Counter(pair.source for p in pairs.values() for pair in p)
             )
+            if not self.cfg.training.enabled:
+                continue
             for role, role_pairs in pairs.items():
                 if len(role_pairs) < self.cfg.training.min_pairs:
                     continue
@@ -301,8 +374,6 @@ class Experiment:
             )
             self.agents[name].roles[role].model = served
             updated.append((name, role))
-            # Rollback only ever returns to the previous version, so anything
-            # older can leave the server.
             history = self.registry.history(name, role)
             if len(history) >= 3:
                 await self.client.unload_adapter(history[-3].served_name)
@@ -322,90 +393,99 @@ class Experiment:
             if bad is not None and bad.cycle == cycle:
                 await self.client.unload_adapter(bad.served_name)
 
-    # ── main loop ────────────────────────────────────────────────────────────
+    # ── entry points ─────────────────────────────────────────────────────────
+
+    async def baseline(self) -> Path:
+        """Benchmarks of the untrained system, once: the whole brain, each
+        specialist with its persona, and the plain base model."""
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self._build_agents(with_memory=False)
+        first = self.cfg.agents.names[0]
+        report = ExperimentReport(config=self.cfg.model_dump(mode="json"))
+        report.baseline_benchmarks = await self._benchmarks("baseline", [first])
+        path = self.run_dir / "report.json"
+        path.write_text(report.model_dump_json(indent=2))
+        await self.client.aclose()
+        return path
 
     async def run(self) -> ExperimentReport:
         self.run_dir.mkdir(parents=True, exist_ok=True)
         report = ExperimentReport(config=self.cfg.model_dump(mode="json"))
-        train, validation = self._load_data()
+        curriculum = self._curriculum()
         self._build_agents()
         self.console.print(
             f"[bold]{self.cfg.experiment.name}[/bold]: agents {list(self.agents)} · "
-            f"{len(train)} train / {len(validation)} validation problems"
+            f"domains {self.cfg.data.domains} · {len(curriculum.validation)} validation tasks"
         )
 
-        self.console.print("[bold yellow]Baseline[/bold yellow]")
-        best, _, _ = await self._validate(validation)
-        report.baseline_validation = dict(best)
-        report.baseline_eval = await self._evalplus("baseline")
-        if self.cfg.evaluation.plain and self.cfg.evaluation.benchmarks:
-            report.baseline_plain = await self._plain(
-                self.cfg.model.served_name, "base"
-            )
+        self.console.print("[bold yellow]Baseline validation[/bold yellow]")
+        start = await self._validate(curriculum.validation)
+        report.baseline_validation = start.whole
+        report.baseline_validation_specialists = start.specialists
+        best_mean = {n: sum(v.values()) / len(v) for n, v in start.whole.items()}
         self._save(report)
 
-        rounds_per_cycle = self.cfg.experiment.rounds_per_cycle
         for cycle in range(1, self.cfg.experiment.cycles + 1):
             self.console.print(f"[bold cyan]Cycle {cycle}[/bold cyan]")
-            problems = train[(cycle - 1) * rounds_per_cycle : cycle * rounds_per_cycle]
             metrics = CycleMetrics(cycle=cycle)
-
-            rounds = await self._compete(cycle, problems)
+            rounds = await self._compete(cycle, curriculum.cycle(cycle))
             self._summarise(rounds, metrics)
 
             self.console.print("  Sleep")
             await self._reflect(cycle, rounds, metrics)
-            updated = (
-                await self._train(cycle, rounds, metrics)
-                if self.cfg.training.enabled
-                else []
-            )
+            updated = await self._train(cycle, rounds, metrics)
 
-            scores, divergence, disagreement = await self._validate(validation)
-            changed = {name for name, _ in updated}
-            for name, score in scores.items():
-                regressed = score < best[name] - self.cfg.training.rollback_threshold
-                if name in changed and regressed:
+            validation = await self._validate(curriculum.validation)
+            metrics.validation = validation.whole
+            metrics.validation_specialists = validation.specialists
+            metrics.answer_divergence = validation.divergence
+            metrics.outcome_disagreement = validation.disagreement
+            changed = {n for n, _ in updated}
+            for name, by_domain in validation.whole.items():
+                mean = sum(by_domain.values()) / len(by_domain)
+                if (
+                    name in changed
+                    and mean < best_mean[name] - self.cfg.training.rollback_threshold
+                ):
                     self.console.print(
                         f"  [yellow]Agent {name} regressed — rolling back[/yellow]"
                     )
                     await self._rollback(cycle, name, updated)
                     metrics.rolled_back.append(name)
                 else:
-                    best[name] = max(best[name], score)
-            metrics.validation_pass_at_1 = scores
-            metrics.code_divergence = divergence
-            metrics.outcome_disagreement = disagreement
+                    best_mean[name] = max(best_mean[name], mean)
             report.cycles.append(metrics)
             self._save(report)
-            self.console.print(f"  Validation Pass@1: {scores}")
+            self.console.print(f"  Validation: {validation.whole}")
 
-        self.console.print("[bold green]Final evaluation[/bold green]")
-        report.final_eval = await self._evalplus("final")
-        if self.cfg.evaluation.plain and self.cfg.evaluation.benchmarks:
-            for name, agent in self.agents.items():
-                for role, spec in agent.specialists.items():
-                    if spec.model != self.cfg.model.served_name:
-                        report.final_plain[f"{name}/{role}"] = await self._plain(
-                            spec.model, f"{name}/{role}"
-                        )
+        self.console.print("[bold green]Final benchmarks[/bold green]")
+        report.final_benchmarks = await self._benchmarks("final", list(self.agents))
         self._save(report)
         await self.client.aclose()
         return report
 
     def _summarise(self, rounds: list[RoundResult], metrics: CycleMetrics) -> None:
         metrics.rounds = len(rounds)
+        specialists = list(self.specialist_personas)
         for name in self.agents:
-            results = [r.results[name] for r in rounds]
-            metrics.solved_rate[name] = sum(r.solved for r in results) / len(rounds)
+            by_domain: dict[str, list[bool]] = defaultdict(list)
+            for r in rounds:
+                by_domain[r.task.domain].append(r.results[name].solved)
+            metrics.solved_rate[name] = {
+                d: sum(v) / len(v) for d, v in by_domain.items()
+            }
             metrics.learned_from_peer[name] = sum(
-                1
-                for r in rounds
-                if name in r.known_solution and r.known_solution[name].found_by != name
+                1 for r in rounds if name in r.known and r.known[name].found_by != name
             )
-            metrics.coordinator_choices[name] = dict(
-                Counter(str(r.decisions[0].choice) for r in results)
+            changed, fixed = discussion_stats(rounds, name)
+            metrics.discussion_changed[name] = changed
+            metrics.discussion_fixed[name] = fixed
+            metrics.specialist_accuracy[name] = specialist_accuracy(
+                rounds, name, specialists
             )
 
     def _save(self, report: ExperimentReport) -> None:
         (self.run_dir / "report.json").write_text(report.model_dump_json(indent=2))
+
+
+__all__ = ["Experiment", "COORDINATOR"]

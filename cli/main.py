@@ -57,13 +57,26 @@ def smoke(config: str = typer.Argument("config/smoke.yaml")) -> None:
 def calibrate(
     config: str = typer.Argument("config/pilot.yaml"),
     model: str = typer.Option("", help="Override the base model"),
-    problems: int = typer.Option(100, help="Training problems to measure on"),
+    per_domain: int = typer.Option(25, help="Training tasks per domain to measure on"),
 ) -> None:
-    """Measure an untrained team: solve rate, validation, output-format compliance."""
+    """Measure an untrained team per domain: solve rates, formats, discussion."""
     from src.calibration import calibrate as run_calibration
 
     cfg = _with_model(load_config(config), model or None)
-    print(asyncio.run(run_calibration(cfg, problems, Console())))
+    print(asyncio.run(run_calibration(cfg, per_domain, Console())))
+
+
+@app.command()
+def baseline(
+    config: str = typer.Argument("config/general.yaml"),
+    model: str = typer.Option("", help="Override the base model"),
+) -> None:
+    """Benchmarks of the untrained system, once: whole brain, each specialist, base model."""
+    from src.experiment import Experiment
+
+    cfg = _with_model(load_config(config), model or None)
+    cfg.experiment.name = "baseline"
+    print(asyncio.run(Experiment(cfg, Console()).baseline()))
 
 
 @app.command()

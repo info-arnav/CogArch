@@ -1,10 +1,10 @@
-# Pilot control: one agent learning alone (same system, no partner).
-# Compare against config/pilot.yaml (two agents) and the baseline
-# (untrained model) recorded at the start of every run.
+# Control: one brain-like agent learning alone across domains.
+# Compare with config/general.yaml (two agents). The untrained system is
+# benchmarked once with `cogarch baseline`.
 
 model:
-  base: "Qwen/Qwen2.5-Coder-1.5B-Instruct"
-  served_name: "Qwen/Qwen2.5-Coder-1.5B-Instruct"
+  base: "Qwen/Qwen2.5-1.5B-Instruct"
+  served_name: "Qwen/Qwen2.5-1.5B-Instruct"
   max_tokens: 768
 
 inference:
@@ -16,23 +16,25 @@ agents:
   seeds: {a: 11}
   specialists: [logical, creative, skeptical, empathetic]
   share_discoveries: false
+  discussion: true          # specialists revise after seeing each other's answers
 
 environment:
-  max_attempts: 3
+  max_attempts: 3           # code and maths; multiple choice always gets 1
   feedback: binary          # agents are only told "wrong"
   execution_timeout_seconds: 10
   memory_limit_mb: 1024
   probes_per_problem: 6
 
 data:
-  validation_size: 50
+  domains: [code, math, reasoning, social]
+  validation_per_domain: 25
   split_seed: 0
 
 training:
   enabled: true
   lora_rank: 16
   lora_alpha: 32
-  learning_rate: 2.0e-5     # LoRA; ~10-60 pairs per role per cycle
+  learning_rate: 2.0e-5
   beta: 0.1
   nll_weight: 1.0           # DPO + NLL on chosen (Pang et al., 2024)
   epochs: 3
@@ -40,7 +42,7 @@ training:
   grad_accumulation: 1
   max_length: 3072
   min_pairs: 4
-  global_slots: 4           # DPO jobs at once on the machine, across all runs
+  global_slots: 4
   rollback_threshold: 0.1
 
 memory:
@@ -54,13 +56,17 @@ memory:
   lessons_in_prompt: 5
 
 evaluation:
-  samples: 5                # Pass@1 averaged over samples per task
-  validation_samples: 3
-  benchmarks: [humaneval, mbpp]
+  benchmarks: [humaneval, mbpp, gsm8k, math500, arc_challenge, siqa, emobench_eu, emobench_ea]
+  max_items: 300            # agent/specialist modes; plain mode and EvalPlus run in full
+  subset_seed: 0
+  samples: 1
+  validation_samples: 2
+  specialists: true
+  plain: true
 
 experiment:
-  name: pilot-solo
+  name: general-solo
   cycles: 5
-  rounds_per_cycle: 100
+  rounds_per_cycle: 100     # 25 per domain
   round_batch_size: 4
   output_dir: data/runs

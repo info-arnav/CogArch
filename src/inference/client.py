@@ -13,7 +13,7 @@ from typing import Protocol
 
 import httpx
 
-from src.models.code import Message
+from src.models.core import Message
 
 TRANSPORT_RETRIES = 5
 

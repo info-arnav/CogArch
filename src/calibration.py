@@ -1,9 +1,8 @@
-"""Model calibration: how well an untrained team does, before any experiment.
+"""Model calibration: how an untrained team does on each training domain.
 
-Used to pick the model. The community only gets learning signal when an
-agent sometimes fails and its partner sometimes succeeds, so the best model
-solves roughly 40–60% of training problems, still has headroom on the
-benchmarks, and follows the coordinator and probe formats reliably.
+The community only gets learning signal when agents sometimes fail and
+sometimes succeed, so a good model solves roughly 40–70% per domain, follows
+the answer formats, and leaves headroom on the benchmarks.
 """
 
 from __future__ import annotations
@@ -11,20 +10,22 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
 from rich.console import Console
 
 from src.config import Config
-from src.eval.benchmarks import mbpp
+from src.environment import Environment
 from src.execution.sandbox import Sandbox
 from src.inference.agent import Agent, Role
 from src.inference.client import InferenceClient
 from src.inference.prompts import load_coordinator, load_specialist
+from src.tasks import Curriculum
 
 
-async def calibrate(cfg: Config, problems: int, console: Console) -> Path:
+async def calibrate(cfg: Config, per_domain: int, console: Console) -> Path:
     client = InferenceClient(
         cfg.inference.base_url,
         cfg.inference.request_timeout_seconds,
@@ -42,40 +43,47 @@ async def calibrate(cfg: Config, problems: int, console: Console) -> Path:
         specialists={n: Role(load_specialist(n), base) for n in cfg.agents.specialists},
         coordinator=Role(load_coordinator(), base),
         client=client,
-        sandbox=sandbox,
+        environment=Environment(sandbox, cfg.environment.feedback),
         memory=None,
         max_attempts=cfg.environment.max_attempts,
         max_tokens=cfg.model.max_tokens,
         probes_per_problem=cfg.environment.probes_per_problem,
+        discussion=cfg.agents.discussion,
     )
-    train, validation = mbpp.split(
-        mbpp.load_pool(), cfg.data.validation_size, cfg.data.split_seed
+    curriculum = Curriculum(
+        cfg.data.domains,
+        cfg.data.validation_per_domain,
+        len(cfg.data.domains) * per_domain,
+        1,
+        cfg.data.split_seed,
     )
-    sample = train[:problems]
+    tasks = curriculum.cycle(1)
 
     start = time.perf_counter()
-    results = await asyncio.gather(*(agent.solve(p) for p in sample))
-    solve_seconds = time.perf_counter() - start
-    probes = await asyncio.gather(*(agent.write_probes(p) for p in sample))
-    answers = await asyncio.gather(*(agent.answer(p) for p in validation))
-    verdicts = await asyncio.gather(
-        *(sandbox.run_tests(code, p) for code, p in zip(answers, validation))
-    )
+    results = await asyncio.gather(*(agent.solve(t) for t in tasks))
+    seconds = time.perf_counter() - start
 
-    decisions = [d for r in results for d in r.decisions]
+    stats: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    for task, result in zip(tasks, results):
+        first = result.decisions[0]
+        s = stats[task.domain]
+        s["first_attempt_solved"].append(float(first.result.passed))
+        s["solved_within_attempts"].append(float(result.solved))
+        s["final_answer_parsed"].append(float(bool(first.answer)))
+        s["round1_parsed"].append(
+            sum(bool(p.answer) for p in first.round1) / len(first.round1)
+        )
+        s["discussion_changed"].append(
+            sum(a.answer != b.answer for a, b in zip(first.round1, first.round2))
+            / len(first.round1)
+        )
     report: dict[str, Any] = {
         "model": cfg.model.base,
-        "problems": len(sample),
-        "first_attempt_solved": sum(r.decisions[0].result.passed for r in results)
-        / len(results),
-        "solved_within_attempts": sum(r.solved for r in results) / len(results),
-        "coordinator_valid_format": sum(d.choice is not None for d in decisions)
-        / len(decisions),
-        "coordinator_combined": sum(d.choice == "combined" for d in decisions)
-        / len(decisions),
-        "probes_parsed": sum(bool(p) for p, _ in probes) / len(probes),
-        "validation_pass_at_1": sum(v.passed for v in verdicts) / len(verdicts),
-        "seconds_per_problem": solve_seconds / len(sample),
+        "tasks_per_domain": per_domain,
+        "seconds_per_task": seconds / len(tasks),
+        "domains": {
+            d: {k: sum(v) / len(v) for k, v in by.items()} for d, by in stats.items()
+        },
     }
     out = Path("data/calibration")
     out.mkdir(parents=True, exist_ok=True)

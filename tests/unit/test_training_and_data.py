@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 
 from src.config import load_config
-from src.eval.benchmarks.mbpp import entry_point, signature, split, to_problem
-from src.eval.evalplus_eval import pass_at_1
-from src.models.code import Message, PreferencePair
+from src.eval.scoring import pass_at_1
+from src.models.core import Message, PreferencePair
+from src.tasks.code import entry_point, signature, split, to_problem
 from src.training.registry import AdapterRegistry, AdapterVersion
 from src.training.trainer import write_dataset
 
@@ -40,7 +40,8 @@ class TestRegistry:
 
 def test_write_dataset_conversational_format(tmp_path):
     pair = PreferencePair(
-        problem_id="p",
+        task_id="p",
+        domain="code",
         agent="a",
         role="logical",
         prompt=[Message(role="system", content="s"), Message(role="user", content="u")],
@@ -111,16 +112,16 @@ def test_pass_at_1(tmp_path):
     assert pass_at_1(path) == {"base": 0.5, "plus": 0.25}
 
 
-@pytest.mark.parametrize("name", ["pilot.yaml", "pilot_solo.yaml", "smoke.yaml"])
+@pytest.mark.parametrize("name", ["general.yaml", "general_solo.yaml", "smoke.yaml"])
 def test_configs_load(name):
     cfg = load_config(CONFIGS / name)
     assert cfg.environment.feedback.value == "binary"
     assert set(cfg.agents.seeds) == set(cfg.agents.names)
 
 
-def test_pilot_and_solo_differ_only_in_partner():
-    pair, solo = load_config(CONFIGS / "pilot.yaml"), load_config(
-        CONFIGS / "pilot_solo.yaml"
+def test_pair_and_solo_differ_only_in_partner():
+    pair, solo = load_config(CONFIGS / "general.yaml"), load_config(
+        CONFIGS / "general_solo.yaml"
     )
     assert pair.agents.names == ["a", "b"] and solo.agents.names == ["a"]
     assert pair.agents.seeds["a"] == solo.agents.seeds["a"]

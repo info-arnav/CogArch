@@ -1,8 +1,9 @@
-# Smoke test: tiny end-to-end run to check the whole pipeline on the server.
+# Smoke test: tiny end-to-end run of the whole pipeline on the server.
+
 
 model:
-  base: "Qwen/Qwen2.5-Coder-1.5B-Instruct"
-  served_name: "Qwen/Qwen2.5-Coder-1.5B-Instruct"
+  base: "Qwen/Qwen2.5-1.5B-Instruct"
+  served_name: "Qwen/Qwen2.5-1.5B-Instruct"
   max_tokens: 768
 
 inference:
@@ -14,23 +15,25 @@ agents:
   seeds: {a: 11, b: 22}
   specialists: [logical, creative, skeptical, empathetic]
   share_discoveries: true
+  discussion: true          # specialists revise after seeing each other's answers
 
 environment:
-  max_attempts: 3
+  max_attempts: 3           # code and maths; multiple choice always gets 1
   feedback: binary          # agents are only told "wrong"
   execution_timeout_seconds: 10
   memory_limit_mb: 1024
   probes_per_problem: 6
 
 data:
-  validation_size: 10
+  domains: [code, math, reasoning, social]
+  validation_per_domain: 3
   split_seed: 0
 
 training:
   enabled: true
   lora_rank: 16
   lora_alpha: 32
-  learning_rate: 2.0e-5     # LoRA; ~10-60 pairs per role per cycle
+  learning_rate: 2.0e-5
   beta: 0.1
   nll_weight: 1.0           # DPO + NLL on chosen (Pang et al., 2024)
   epochs: 3
@@ -38,7 +41,7 @@ training:
   grad_accumulation: 1
   max_length: 3072
   min_pairs: 1
-  global_slots: 4           # DPO jobs at once on the machine, across all runs
+  global_slots: 4
   rollback_threshold: 0.1
 
 memory:
@@ -52,13 +55,17 @@ memory:
   lessons_in_prompt: 5
 
 evaluation:
-  samples: 1                # Pass@1 averaged over samples per task
+  benchmarks: [gsm8k, siqa, emobench_ea]
+  max_items: 20
+  subset_seed: 0
+  samples: 1
   validation_samples: 1
-  benchmarks: [humaneval]   # times one EvalPlus pass
+  specialists: true
+  plain: true
 
 experiment:
   name: smoke
   cycles: 1
-  rounds_per_cycle: 24
+  rounds_per_cycle: 12
   round_batch_size: 4
   output_dir: data/runs

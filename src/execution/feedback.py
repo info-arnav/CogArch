@@ -7,10 +7,10 @@ tests, the expected outputs, how many tests passed, or the right answer.
 from __future__ import annotations
 
 from src.config import FeedbackLevel
-from src.models.code import ExecutionResult
+from src.models.core import Verdict
 
 
-def describe_failure(result: ExecutionResult, level: FeedbackLevel) -> str:
+def describe_failure(result: Verdict, level: FeedbackLevel) -> str:
     """Feedback text for a submission ('' if it was accepted)."""
     if result.passed:
         return ""

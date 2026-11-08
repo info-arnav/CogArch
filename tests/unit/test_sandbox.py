@@ -2,10 +2,12 @@
 
 from src.config import FeedbackLevel
 from src.execution.sandbox import Sandbox, behaves_alike
-from src.models.code import CodeProblem
+from src.models.core import Task
 
-PROBLEM = CodeProblem(
+PROBLEM = Task(
     task_id="t",
+    domain="code",
+    kind="code",
     prompt="add",
     entry_point="add",
     tests=["assert add(1, 2) == 3", "assert add(0, 0) == 0"],

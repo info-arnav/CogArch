@@ -3,7 +3,7 @@
 import httpx
 
 from src.inference.client import InferenceClient
-from src.models.code import Message
+from src.models.core import Message
 
 
 async def test_chat_retries_dropped_connection():

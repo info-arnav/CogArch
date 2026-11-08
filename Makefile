@@ -1,4 +1,4 @@
-.PHONY: help install-dev test lint format clean serve smoke pilot dashboard tunnel calibrate
+.PHONY: help install-dev test lint format clean serve smoke pilot dashboard tunnel calibrate baseline
 
 help:
 	@echo "Local:"
@@ -14,7 +14,8 @@ help:
 	@echo "  make pilot         Launch the pilot runs in the background"
 	@echo "  make dashboard     Live dashboard on the server's localhost:8080"
 	@echo "  make tunnel        Public https link to the dashboard (Cloudflare)"
-	@echo "  make calibrate     Compare candidate models before the experiment"
+	@echo "  make calibrate     Untrained team per domain: solve rates, formats, discussion"
+	@echo "  make baseline      Benchmarks of the untrained system (once)"
 	@echo "Laptop: scripts/sync_to_laptop.sh root@<server>   (keeps a copy of all runs)"
 
 install-dev:
@@ -54,4 +55,7 @@ tunnel:
 	scripts/tunnel.sh
 
 calibrate:
-	scripts/calibrate.sh Qwen/Qwen2.5-Coder-1.5B-Instruct Qwen/Qwen2.5-Coder-3B-Instruct Qwen/Qwen2.5-Coder-7B-Instruct
+	$(EXP) python -m cli.main calibrate config/general.yaml
+
+baseline:
+	$(EXP) python -m cli.main baseline config/general.yaml

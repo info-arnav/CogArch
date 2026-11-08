@@ -1,130 +1,107 @@
-"""Prompt building and output parsing."""
+"""Prompt building and parsing."""
 
 from src.inference.prompts import (
+    coordinator_endorsement,
     coordinator_messages,
-    coordinator_selection,
-    extract_code,
+    discussion_messages,
     load_coordinator,
     load_specialist,
-    parse_coordinator,
     parse_probes,
     parse_reflection,
     specialist_messages,
+    task_text,
 )
-from src.models.code import CodeProblem, Decision, ExecutionResult, Proposal
-
-PROBLEM = CodeProblem(
-    task_id="t",
-    prompt="Add two numbers.",
-    entry_point="add",
-    tests=["assert add(1, 2) == 3"],
-)
-NAMES = ["logical", "creative", "skeptical", "empathetic"]
+from src.models.core import Decision, Proposal, Task, Verdict
 
 
-def wrong_decision() -> Decision:
-    return Decision(
-        attempt_number=1,
-        proposals=[],
-        coordinator_prompt=[],
-        coordinator_output="",
-        code="def add(a, b):\n    return a - b",
-        result=ExecutionResult(
-            passed=False,
-            tests_passed=0,
-            tests_total=1,
-            feedback="Your solution is wrong.",
-        ),
+def prop(name: str, text: str) -> Proposal:
+    return Proposal(specialist=name, round=1, response=text, answer="")
+
+
+def test_task_text_per_kind(add_task, math_task, choice_task):
+    assert task_text(add_task).startswith(
+        "Please provide a self-contained Python script"
+    )
+    assert "`add`" in task_text(add_task)
+    assert "\\boxed{}" in task_text(math_task)
+    text = task_text(choice_task)
+    assert "A. happy\nB. sad\nC. bored" in text and "FINAL ANSWER: <letter>" in text
+
+
+def test_code_stub_is_fenced():
+    stub = Task(
+        task_id="h",
+        domain="code",
+        kind="code",
+        prompt="def f():\n    pass",
+        prompt_is_code=True,
+        entry_point="f",
+    )
+    assert "```python\ndef f():" in task_text(stub)
+
+
+def test_prompts_never_contain_gold_or_tests(add_task, math_task):
+    assert (
+        "assert"
+        not in specialist_messages(load_specialist("logical"), add_task)[-1].content
+    )
+    assert (
+        "42"
+        not in specialist_messages(load_specialist("logical"), math_task)[-1].content
     )
 
 
-class TestPromptsNeverLeakTests:
-    def test_specialist_prompt(self):
-        msgs = specialist_messages(
-            load_specialist("logical"), PROBLEM, previous=wrong_decision()
-        )
-        text = msgs[-1].content
-        assert "assert" not in text
-        assert "Your solution is wrong." in text and "return a - b" in text
-
-    def test_coordinator_prompt_lists_every_proposal(self):
-        proposals = [Proposal(specialist=n, code=f"# {n}") for n in NAMES]
-        text = coordinator_messages(load_coordinator(), PROBLEM, proposals)[-1].content
-        assert "assert" not in text
-        assert all(f"### {n}" in text for n in NAMES)
-
-    def test_memory_is_prepended(self):
-        msgs = specialist_messages(
-            load_specialist("logical"), PROBLEM, memory_text="## Lessons"
-        )
-        assert msgs[-1].content.startswith("## Lessons")
+def test_retry_shows_previous_answer_and_wrong(math_task):
+    prev = Decision(
+        attempt_number=1,
+        round1=[],
+        round2=[],
+        coordinator_prompt=[],
+        coordinator_output="",
+        answer="41",
+        result=Verdict(passed=False, feedback="Your answer is wrong."),
+    )
+    text = specialist_messages(load_specialist("logical"), math_task, previous=prev)[
+        -1
+    ].content
+    assert "41" in text and "Your answer is wrong." in text
 
 
-class TestParsing:
-    def test_extract_code_block(self):
-        assert extract_code("text\n```python\nx = 1\n```\nmore") == "x = 1"
+def test_discussion_and_decision_prompts(math_task):
+    own, mates = prop("logical", "I say 36"), [prop("creative", "I say 42")]
+    text = discussion_messages(load_specialist("logical"), math_task, own, mates)[
+        -1
+    ].content
+    assert "I say 36" in text and "### creative\nI say 42" in text
+    decide = coordinator_messages(load_coordinator(), math_task, [own, *mates])[
+        -1
+    ].content
+    assert "### logical" in decide and "### creative" in decide
 
-    def test_extract_code_without_block(self):
-        assert extract_code("x = 1") == "x = 1"
 
-    def test_choose_submits_proposal_unchanged(self):
-        proposals = [Proposal(specialist=n, code=f"# {n}") for n in NAMES]
-        assert parse_coordinator("CHOOSE: Skeptical", proposals) == (
-            "# skeptical",
-            "skeptical",
-        )
-        assert parse_coordinator("**CHOOSE:** creative", proposals) == (
-            "# creative",
-            "creative",
-        )
+def test_long_replies_are_truncated(math_task):
+    own = prop("logical", "x" * 5000)
+    text = discussion_messages(load_specialist("logical"), math_task, own, [])[
+        -1
+    ].content
+    assert "x" * 1800 + " …" in text and "x" * 1801 not in text
 
-    def test_combine_submits_own_code(self):
-        proposals = [Proposal(specialist=n, code=f"# {n}") for n in NAMES]
-        reply = "COMBINE:\n```python\nx = 1\n```"
-        assert parse_coordinator(reply, proposals) == ("x = 1", "combined")
 
-    def test_unformatted_reply_uses_its_code(self):
-        proposals = [Proposal(specialist=n, code=f"# {n}") for n in NAMES]
-        assert parse_coordinator("```python\ny = 2\n```", proposals) == ("y = 2", None)
-        assert parse_coordinator("CHOOSE: nobody", proposals) == (
-            "CHOOSE: nobody",
-            None,
-        )
+def test_endorsement_contains_the_reasoning():
+    assert coordinator_endorsement(prop("skeptical", "\\boxed{42}")).startswith(
+        "skeptical's reasoning holds up"
+    )
 
-    def test_coordinator_selection_roundtrip(self):
-        proposal = Proposal(specialist="skeptical", code="x = 1")
-        reply = coordinator_selection(proposal)
-        assert parse_coordinator(reply, [proposal]) == ("x = 1", "skeptical")
 
-    def test_parse_probes_keeps_only_calls(self):
-        text = "```python\nadd(1, 2)\nadd(0, 0)\nprint('x')\nadd(1, 2)\n```"
-        assert parse_probes(text, "add", 5) == ["add(1, 2)", "add(0, 0)"]
+def test_parse_probes_from_any_block():
+    text = "```python\ndef add(a, b): ...\n```\n```python\nadd(1, 2)\nadd(0, 0)\n```"
+    assert parse_probes(text, "add", 5) == ["add(1, 2)", "add(0, 0)"]
 
-    def test_parse_probes_from_second_code_block(self):
-        text = (
-            "```python\ndef add(a, b):\n    return a + b\n```\nCalls:\n"
-            "```python\nadd(3, 4)\nadd(0, 0)\n```"
-        )
-        assert parse_probes(text, "add", 5) == ["add(3, 4)", "add(0, 0)"]
 
-    def test_parse_reflection_operations(self):
-        text = (
-            "ADD: Check for empty input before indexing\n"
-            "- AGREE 2\n"
-            "DISAGREE 7\n"
-            "EDIT 1: Off-by-one errors happen at range ends\n"
-            "random chatter"
-        )
-        assert parse_reflection(text, existing=3) == [
-            ("add", None, "Check for empty input before indexing"),
-            ("agree", 2, ""),
-            ("edit", 1, "Off-by-one errors happen at range ends"),
-        ]
-
-    def test_task_text_uses_evalplus_instruction_and_fences_stubs(self):
-        stub = PROBLEM.model_copy(
-            update={"prompt": "def add(a, b):\n    pass", "prompt_is_code": True}
-        )
-        text = specialist_messages(load_specialist("logical"), stub)[-1].content
-        assert text.startswith("Please provide a self-contained Python script")
-        assert "```python\ndef add(a, b):" in text
+def test_parse_reflection_operations():
+    text = "ADD: Re-read the question\n- AGREE 2\nDISAGREE 9\nEDIT 1: Check units"
+    assert parse_reflection(text, existing=3) == [
+        ("add", None, "Re-read the question"),
+        ("agree", 2, ""),
+        ("edit", 1, "Check units"),
+    ]

@@ -1,4 +1,4 @@
-"""MBPP training pool for the community.
+"""Code tasks: the MBPP training pool and the EvalPlus benchmarks.
 
 Uses the full MBPP dataset (all splits) minus every task that appears in
 MBPP+, which is reserved for evaluation. Agents see the task description and
@@ -11,7 +11,7 @@ import random
 import re
 from typing import Any
 
-from src.models.code import CodeProblem
+from src.models.core import Task
 
 _ASSERT_CALL = re.compile(r"assert\s+(?:not\s+)?\(?\s*(?:set\()?\s*(\w+)\s*\(")
 
@@ -37,15 +37,17 @@ def signature(code: str, name: str) -> str:
     return match.group(0)
 
 
-def to_problem(row: dict[str, Any]) -> CodeProblem:
+def to_problem(row: dict[str, Any]) -> Task:
     tests = [t.strip() for t in row["test_list"] if t.strip()]
     name = entry_point(row["code"], tests)
     prompt = (
         f"{row['text'].strip()}\n\n"
         f"Use this signature:\n```python\n{signature(row['code'], name)}\n```"
     )
-    return CodeProblem(
+    return Task(
         task_id=f"mbpp/{row['task_id']}",
+        domain="code",
+        kind="code",
         prompt=prompt,
         entry_point=name,
         tests=tests,
@@ -54,8 +56,8 @@ def to_problem(row: dict[str, Any]) -> CodeProblem:
 
 
 def split(
-    problems: list[CodeProblem], validation_size: int, seed: int
-) -> tuple[list[CodeProblem], list[CodeProblem]]:
+    problems: list[Task], validation_size: int, seed: int
+) -> tuple[list[Task], list[Task]]:
     """Deterministic (train, validation) split."""
     shuffled = sorted(problems, key=lambda p: p.task_id)
     random.Random(seed).shuffle(shuffled)
@@ -68,7 +70,7 @@ def mbpp_plus_task_numbers() -> set[int]:
     return {int(task_id.split("/")[1]) for task_id in get_mbpp_plus()}
 
 
-def load_pool() -> list[CodeProblem]:
+def load_pool() -> list[Task]:
     """All MBPP tasks not in MBPP+."""
     from datasets import load_dataset
 
@@ -80,3 +82,21 @@ def load_pool() -> list[CodeProblem]:
         if row["task_id"] not in excluded
     ]
     return [to_problem(row) for row in rows]
+
+
+def evalplus_tasks(benchmark: str) -> list[Task]:
+    """HumanEval+ ('humaneval') or MBPP+ ('mbpp') as tasks; scored by EvalPlus."""
+    from evalplus.data import get_human_eval_plus, get_mbpp_plus
+
+    problems = get_human_eval_plus() if benchmark == "humaneval" else get_mbpp_plus()
+    return [
+        Task(
+            task_id=tid,
+            domain="code",
+            kind="code",
+            prompt=p["prompt"],
+            prompt_is_code=True,
+            entry_point=p["entry_point"],
+        )
+        for tid, p in problems.items()
+    ]

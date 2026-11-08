@@ -2,279 +2,231 @@
 
     python -m cli.main analyze            # writes data/analysis/
 
-Groups runs by condition (pair = two agents, solo = one agent) and reports
-means ± standard deviation across agents and replicates.
+Reads the `baseline` run (untrained system) and every finished run, groups runs
+by condition (pair = two agents, solo = one agent), and reports mean ± SD
+across agents and replicates.
 """
 
 from __future__ import annotations
 
 import json
 import statistics
-from collections import Counter, defaultdict
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
 COLORS = {"pair": "#2a78d6", "solo": "#eb6834"}
-CHOICE_COLORS = {
+SPECIALIST_COLORS = {
     "logical": "#2a78d6",
     "creative": "#eb6834",
     "skeptical": "#1baf7a",
     "empathetic": "#eda100",
-    "combined": "#6250d6",
-}
-BENCH_NAMES = {
-    ("humaneval", "base"): "HumanEval",
-    ("humaneval", "plus"): "HumanEval+",
-    ("mbpp", "base"): "MBPP",
-    ("mbpp", "plus"): "MBPP+",
 }
 
 
-def _mean_sd(values: list[float]) -> tuple[float, float]:
+def _ms(values: list[float], scale: float = 100.0) -> str:
     if not values:
-        return float("nan"), float("nan")
-    sd = statistics.stdev(values) if len(values) > 1 else 0.0
-    return statistics.mean(values), sd
+        return "–"
+    vals = [v * scale for v in values]
+    sd = statistics.stdev(vals) if len(vals) > 1 else 0.0
+    return f"{statistics.mean(vals):.1f} ± {sd:.1f}"
 
 
-def _fmt(values: list[float], scale: float = 100.0, signed: bool = False) -> str:
-    mean, sd = _mean_sd([v * scale for v in values])
-    sign = "+" if signed and mean >= 0 else ""
-    return f"{sign}{mean:.1f} ± {sd:.1f} (n={len(values)})"
+def _signed(values: list[float]) -> str:
+    if not values:
+        return "–"
+    text = _ms(values)
+    return text if text.startswith("-") else "+" + text
 
 
-def load_runs(runs_root: Path) -> list[dict[str, Any]]:
-    runs = []
-    for report in sorted(runs_root.glob("*/report.json")):
-        data = json.loads(report.read_text())
-        if not data["final_eval"]:
+def load(
+    runs_root: Path,
+) -> tuple[dict[str, Any] | None, dict[str, list[dict[str, Any]]]]:
+    baseline = None
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for path in sorted(runs_root.glob("*/report.json")):
+        data = json.loads(path.read_text())
+        data["name"], data["dir"] = path.parent.name, path.parent
+        if path.parent.name == "baseline":
+            baseline = data
+            continue
+        if not data["final_benchmarks"]:
             continue
         agents = data["config"]["agents"]["names"]
-        data["name"] = report.parent.name
-        data["dir"] = report.parent
-        data["condition"] = "solo" if len(agents) == 1 else "pair"
         data["agents"] = agents
-        runs.append(data)
-    return runs
+        groups["solo" if len(agents) == 1 else "pair"].append(data)
+    return baseline, dict(sorted(groups.items()))
 
 
-def by_condition(runs: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for run in runs:
-        groups[run["condition"]].append(run)
-    return dict(sorted(groups.items()))
+def _entries(
+    reports: list[dict[str, Any]], mode: str, stage: str
+) -> list[dict[str, Any]]:
+    key = "final_benchmarks" if stage == "final" else "baseline_benchmarks"
+    return [e for r in reports for e in r[key] if e["mode"] == mode]
 
 
-# ── tables ──────────────────────────────────────────────────────────────────
-
-
-def evalplus_table(groups: dict[str, list[dict[str, Any]]]) -> str:
-    lines = [
-        "| Benchmark | Condition | Start | End | Change (pp) |",
-        "|---|---|---|---|---|",
-    ]
-    for (bench, kind), label in BENCH_NAMES.items():
-        for condition, runs in groups.items():
-            start, end, delta = [], [], []
-            for run in runs:
-                for b, e in zip(run["baseline_eval"], run["final_eval"]):
-                    if bench in b["scores"]:
-                        s, f = b["scores"][bench][kind], e["scores"][bench][kind]
-                        start.append(s)
-                        end.append(f)
-                        delta.append(f - s)
-            if start:
-                lines.append(
-                    f"| {label} | {condition} | {_fmt(start)} | {_fmt(end)} | "
-                    f"{_fmt(delta, signed=True)} |"
-                )
-    return "\n".join(lines)
-
-
-def plain_table(groups: dict[str, list[dict[str, Any]]]) -> str:
-    """Official EvalPlus protocol: base model alone vs each fine-tuned specialist alone."""
-    lines = [
-        "| Benchmark | Model | Pass@1 | Change vs base (pp) |",
-        "|---|---|---|---|",
-    ]
-    all_runs = [r for runs in groups.values() for r in runs]
-    for (bench, kind), label in BENCH_NAMES.items():
-        base = [
-            r["baseline_plain"][bench][kind]
-            for r in all_runs
-            if bench in r.get("baseline_plain", {})
-        ]
-        if not base:
-            continue
-        lines.append(f"| {label} | base model (official protocol) | {_fmt(base)} | – |")
-        for condition, runs in groups.items():
-            scores, deltas = [], []
-            for run in runs:
-                start = run["baseline_plain"][bench][kind]
-                for per_bench in run.get("final_plain", {}).values():
-                    scores.append(per_bench[bench][kind])
-                    deltas.append(per_bench[bench][kind] - start)
-            if scores:
-                lines.append(
-                    f"| {label} | fine-tuned specialists, {condition} | {_fmt(scores)} | "
-                    f"{_fmt(deltas, signed=True)} |"
-                )
-    return "\n".join(lines)
-
-
-def per_cycle_agent_values(run: dict[str, Any], key: str) -> list[list[float]]:
-    """[cycle][agent] values of a per-agent cycle metric."""
-    return [[c[key][a] for a in run["agents"] if a in c[key]] for c in run["cycles"]]
-
-
-def validation_series(runs: list[dict[str, Any]]) -> list[list[float]]:
-    """[cycle 0..N][agent values pooled across runs]."""
-    cycles = max(len(r["cycles"]) for r in runs)
-    series: list[list[float]] = [[] for _ in range(cycles + 1)]
-    for run in runs:
-        series[0].extend(run["baseline_validation"][a] for a in run["agents"])
-        for i, c in enumerate(run["cycles"], start=1):
-            series[i].extend(c["validation_pass_at_1"][a] for a in run["agents"])
-    return series
-
-
-def validation_table(groups: dict[str, list[dict[str, Any]]]) -> str:
-    cycles = max(len(r["cycles"]) for runs in groups.values() for r in runs)
-    header = (
-        "| Condition | "
-        + " | ".join(["Start"] + [f"Cycle {i}" for i in range(1, cycles + 1)])
-        + " |"
-    )
-    lines = [header, "|---|" + "---|" * (cycles + 1)]
+def benchmark_table(baseline: dict[str, Any] | None, groups: dict[str, list]) -> str:
+    """Rows: benchmark × metric. Columns: untrained and trained, per mode."""
+    columns: list[tuple[str, list[dict[str, Any]]]] = []
+    if baseline:
+        for mode, label in (
+            ("agent", "Untrained · whole agent"),
+            ("plain", "Untrained · base model (plain)"),
+        ):
+            columns.append((label, _entries([baseline], mode, "baseline")))
     for condition, runs in groups.items():
-        cells = [_fmt(v).split(" (")[0] for v in validation_series(runs)]
-        lines.append(f"| {condition} | " + " | ".join(cells) + " |")
+        columns.append(
+            (f"Trained {condition} · whole agent", _entries(runs, "agent", "final"))
+        )
+        columns.append(
+            (
+                f"Trained {condition} · fine-tuned specialists (plain)",
+                _entries(runs, "plain", "final"),
+            )
+        )
+    columns = [(label, e) for label, e in columns if e]
+    if not columns:
+        return "_No benchmark results yet._"
+    benches = list(columns[0][1][0]["scores"])
+    lines = [
+        "| Benchmark | " + " | ".join(label for label, _ in columns) + " |",
+        "|---|" + "---|" * len(columns),
+    ]
+    for bench in benches:
+        metrics = list(columns[0][1][0]["scores"][bench])
+        for metric in metrics:
+            cells = [
+                _ms(
+                    [
+                        e["scores"][bench][metric]
+                        for e in entries
+                        if bench in e["scores"]
+                    ]
+                )
+                for _, entries in columns
+            ]
+            label = bench if metric == "accuracy" else f"{bench} ({metric})"
+            lines.append(f"| {label} | " + " | ".join(cells) + " |")
     return "\n".join(lines)
 
 
-def training_table(groups: dict[str, list[dict[str, Any]]]) -> str:
+def specialist_benchmark_table(
+    baseline: dict[str, Any] | None, groups: dict[str, list]
+) -> str:
+    """Each specialist alone (own persona) on every benchmark: untrained vs trained."""
+    columns = []
+    if baseline:
+        columns.append(("untrained", _entries([baseline], "specialist", "baseline")))
+    for condition, runs in groups.items():
+        columns.append((f"trained {condition}", _entries(runs, "specialist", "final")))
+    columns = [(c, e) for c, e in columns if e]
+    if not columns:
+        return "_No specialist benchmark results yet._"
+    benches = list(columns[0][1][0]["scores"])
     lines = [
-        "| Condition | Cycle | Solved during training | Learned from partner (per agent) | "
-        "Training pairs (per agent) | Pairs from partner | Code divergence | "
-        "Outcome disagreement |",
+        "| Specialist | Benchmark | " + " | ".join(c for c, _ in columns) + " |",
+        "|---|---|" + "---|" * len(columns),
+    ]
+    specialists = sorted({e["system"].split("/")[1] for _, es in columns for e in es})
+    for s in specialists:
+        for bench in benches:
+            metric = (
+                "plus" if "plus" in columns[0][1][0]["scores"][bench] else "accuracy"
+            )
+            cells = [
+                _ms(
+                    [
+                        e["scores"][bench][metric]
+                        for e in es
+                        if e["system"].endswith("/" + s)
+                    ]
+                )
+                for _, es in columns
+            ]
+            lines.append(f"| {s} | {bench} | " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
+def specialisation_table(groups: dict[str, list]) -> str:
+    """Validation accuracy of each specialist alone, per domain: start → end (change),
+    and how often it ended as its domain's owner across agents."""
+    lines = [
+        "| Condition | Specialist | Domain | Start | End | Change | Owner (share of agents) |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for condition, runs in groups.items():
+        start: dict[tuple[str, str], list[float]] = defaultdict(list)
+        end: dict[tuple[str, str], list[float]] = defaultdict(list)
+        change: dict[tuple[str, str], list[float]] = defaultdict(list)
+        owner: dict[tuple[str, str], int] = defaultdict(int)
+        agents_total = 0
+        for run in runs:
+            last = run["cycles"][-1]
+            for a in run["agents"]:
+                agents_total += 1
+                records = last["domain_records"].get(a, {})
+                for s, by in run["baseline_validation_specialists"][a].items():
+                    for d, v0 in by.items():
+                        v1 = last["validation_specialists"][a][s].get(d)
+                        start[(s, d)].append(v0)
+                        if v1 is not None:
+                            end[(s, d)].append(v1)
+                            change[(s, d)].append(v1 - v0)
+                domains = {d for by in records.values() for d in by}
+                for d in domains:
+                    best = max(
+                        records, key=lambda name: float(records[name].get(d, 0.5))
+                    )  # noqa: B023
+                    owner[(best, d)] += 1
+        for s, d in sorted(start):
+            lines.append(
+                f"| {condition} | {s} | {d} | {_ms(start[(s, d)])} | {_ms(end[(s, d)])} | "
+                f"{_signed(change[(s, d)])} | {owner[(s, d)]}/{agents_total} |"
+            )
+    return "\n".join(lines)
+
+
+def learning_table(groups: dict[str, list]) -> str:
+    lines = [
+        "| Condition | Cycle | Solved in training | Learned from partner | "
+        "Discussion changed | Changed answers fixed | Answers differ | Verdicts differ |",
         "|---|---|---|---|---|---|---|---|",
     ]
     for condition, runs in groups.items():
-        cycles = max(len(r["cycles"]) for r in runs)
-        for i in range(cycles):
-            solved, peer, pairs, peer_share, div, dis = [], [], [], [], [], []
+        for i in range(max(len(r["cycles"]) for r in runs)):
+            solved, peer, changed, fixed, div, dis = [], [], [], [], [], []
             for run in runs:
                 if i >= len(run["cycles"]):
                     continue
                 c = run["cycles"][i]
                 for a in run["agents"]:
-                    solved.append(c["solved_rate"][a])
+                    rates = list(c["solved_rate"][a].values())
+                    solved.append(sum(rates) / len(rates))
                     peer.append(c["learned_from_peer"].get(a, 0))
-                    total = sum(c["preference_pairs"].get(a, {}).values())
-                    pairs.append(total)
-                    from_peer = sum(
-                        n
-                        for src, n in c["pair_sources"].get(a, {}).items()
-                        if src != "self"
-                    )
-                    if total:
-                        peer_share.append(from_peer / total)
-                if c["code_divergence"] is not None:
-                    div.append(c["code_divergence"])
+                    changed.append(c["discussion_changed"].get(a, 0.0))
+                    fixed.append(c["discussion_fixed"].get(a, 0.0))
+                if c["answer_divergence"] is not None:
+                    div.append(c["answer_divergence"])
                     dis.append(c["outcome_disagreement"])
             lines.append(
-                f"| {condition} | {i + 1} | {_fmt(solved).split(' (')[0]}% | "
-                f"{_fmt(peer, scale=1).split(' (')[0]} | {_fmt(pairs, scale=1).split(' (')[0]} | "
-                f"{_fmt(peer_share).split(' (')[0] + '%' if peer_share else '–'} | "
-                f"{_fmt(div).split(' (')[0] + '%' if div else '–'} | "
-                f"{_fmt(dis).split(' (')[0] + '%' if dis else '–'} |"
+                f"| {condition} | {i + 1} | {_ms(solved)} | {_ms(peer, 1)} | {_ms(changed)} | "
+                f"{_ms(fixed)} | {_ms(div)} | {_ms(dis)} |"
             )
     return "\n".join(lines)
 
 
-def coordinator_stats(run: dict[str, Any]) -> list[dict[str, Any]]:
-    """Per cycle: choice shares, and how often the chosen proposal was right
-    compared with the average proposal (only where correctness is known)."""
-    stats = []
-    for cycle in range(1, len(run["cycles"]) + 1):
-        path = run["dir"] / "rounds" / f"cycle_{cycle}.jsonl"
-        choices: Counter[str] = Counter()
-        chosen_right, chosen_n, any_right, any_n = 0, 0, 0, 0
-        with open(path) as f:
-            for line in f:
-                r = json.loads(line)
-                for agent, result in r["results"].items():
-                    first = result["decisions"][0]
-                    choices[str(first["choice"])] += 1
-                    agreement = r["agreement"].get(agent, {})
-                    known = [
-                        agreement[f"1:{p['specialist']}"]
-                        for p in first["proposals"]
-                        if f"1:{p['specialist']}" in agreement
-                    ]
-                    if not known:
-                        continue
-                    any_right += sum(known)
-                    any_n += len(known)
-                    key = f"1:{first['choice']}"
-                    if key in agreement:
-                        chosen_right += agreement[key]
-                        chosen_n += 1
-        total = sum(choices.values())
-        stats.append(
-            {
-                "cycle": cycle,
-                "shares": {k: v / total for k, v in choices.items()},
-                "chosen_accuracy": chosen_right / chosen_n if chosen_n else None,
-                "proposal_accuracy": any_right / any_n if any_n else None,
-            }
-        )
-    return stats
-
-
-def coordinator_table(groups: dict[str, list[dict[str, Any]]]) -> str:
-    lines = [
-        "| Condition | Cycle | Most chosen | Combined | Chosen proposal right | "
-        "Average proposal right |",
-        "|---|---|---|---|---|---|",
-    ]
-    for condition, runs in groups.items():
-        per_run = [coordinator_stats(r) for r in runs]
-        for i in range(max(len(s) for s in per_run)):
-            shares: Counter[str] = Counter()
-            chosen, base = [], []
-            for stats in per_run:
-                if i < len(stats):
-                    shares.update(stats[i]["shares"])
-                    if stats[i]["chosen_accuracy"] is not None:
-                        chosen.append(stats[i]["chosen_accuracy"])
-                        base.append(stats[i]["proposal_accuracy"])
-            norm = sum(shares.values())
-            top = max(
-                ((k, v) for k, v in shares.items() if k not in ("combined", "None")),
-                key=lambda kv: kv[1],
-            )
-            lines.append(
-                f"| {condition} | {i + 1} | {top[0]} ({100 * top[1] / norm:.0f}%) | "
-                f"{100 * shares.get('combined', 0) / norm:.0f}% | "
-                f"{_fmt(chosen).split(' (')[0]}% | {_fmt(base).split(' (')[0]}% |"
-            )
-    return "\n".join(lines)
-
-
-def lessons_section(groups: dict[str, list[dict[str, Any]]]) -> str:
-    parts = []
-    for condition, runs in groups.items():
-        run = runs[0]
-        last = run["cycles"][-1]
-        for agent, lessons in last["lessons"].items():
-            parts.append(f"**{run['name']} · agent {agent} · cycle {last['cycle']}**")
-            parts.extend(f"- {lesson}" for lesson in lessons)
-            parts.append("")
-    return "\n".join(parts)
-
-
-# ── figures ─────────────────────────────────────────────────────────────────
+def validation_series(runs: list[dict[str, Any]]) -> list[list[float]]:
+    """[cycle 0..N][agent mean-over-domains values]."""
+    n = max(len(r["cycles"]) for r in runs)
+    series: list[list[float]] = [[] for _ in range(n + 1)]
+    for run in runs:
+        for a in run["agents"]:
+            v = run["baseline_validation"][a]
+            series[0].append(sum(v.values()) / len(v))
+            for i, c in enumerate(run["cycles"], start=1):
+                v = c["validation"][a]
+                series[i].append(sum(v.values()) / len(v))
+    return series
 
 
 def _style(ax: Any) -> None:
@@ -284,14 +236,13 @@ def _style(ax: Any) -> None:
     ax.set_axisbelow(True)
 
 
-def figures(groups: dict[str, list[dict[str, Any]]], out: Path) -> list[str]:
+def figures(groups: dict[str, list], out: Path) -> list[str]:
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     written = []
-
     fig, ax = plt.subplots(figsize=(6, 3.6))
     for condition, runs in groups.items():
         series = validation_series(runs)
@@ -316,7 +267,7 @@ def figures(groups: dict[str, list[dict[str, Any]]], out: Path) -> list[str]:
             linewidth=0,
         )
     ax.set_xlabel("Cycle (0 = untrained)")
-    ax.set_ylabel("Validation Pass@1 (%)")
+    ax.set_ylabel("Validation accuracy, mean over domains (%)")
     ax.legend(frameon=False)
     _style(ax)
     fig.tight_layout()
@@ -324,125 +275,78 @@ def figures(groups: dict[str, list[dict[str, Any]]], out: Path) -> list[str]:
     plt.close(fig)
     written.append("validation.png")
 
-    fig, ax = plt.subplots(figsize=(6.5, 3.6))
-    labels = list(BENCH_NAMES.values())
-    width = 0.36
-    for j, (condition, runs) in enumerate(groups.items()):
-        for i, ((bench, kind), _) in enumerate(BENCH_NAMES.items()):
-            deltas = [
-                100 * (e["scores"][bench][kind] - b["scores"][bench][kind])
-                for run in runs
-                for b, e in zip(run["baseline_eval"], run["final_eval"])
-                if bench in b["scores"]
-            ]
-            if not deltas:
-                continue
-            x = i + (j - 0.5) * width
-            ax.bar(
-                x,
-                statistics.mean(deltas),
-                width * 0.9,
-                color=COLORS[condition],
-                label=condition if i == 0 else None,
-            )
-            ax.scatter([x] * len(deltas), deltas, s=12, color="#52514e", zorder=3)
-    ax.axhline(0, color="#52514e", linewidth=0.8)
-    ax.set_xticks(range(len(labels)))
-    ax.set_xticklabels(labels)
-    ax.set_ylabel("Change, start → end (pp)")
-    ax.legend(frameon=False)
-    _style(ax)
-    fig.tight_layout()
-    fig.savefig(out / "evalplus_change.png", dpi=200)
-    plt.close(fig)
-    written.append("evalplus_change.png")
-
-    if "pair" in groups:
-        runs = groups["pair"]
-        fig, ax = plt.subplots(figsize=(6, 3.6))
-        cycles = max(len(r["cycles"]) for r in runs)
-        xs = list(range(1, cycles + 1))
-        for key, label, color in (
-            ("code_divergence", "Different code", "#2a78d6"),
-            (
-                "outcome_disagreement",
-                "Different verdict (one right, one wrong)",
-                "#eb6834",
-            ),
-        ):
-            ys = [
-                100
-                * statistics.mean(
-                    r["cycles"][i][key] for r in runs if i < len(r["cycles"])
-                )
-                for i in range(cycles)
-            ]
-            ax.plot(
-                xs, ys, color=color, linewidth=2, marker="o", markersize=5, label=label
-            )
-        ax.set_xlabel("Cycle")
-        ax.set_ylabel("% of validation problems")
-        ax.legend(frameon=False)
-        _style(ax)
-        fig.tight_layout()
-        fig.savefig(out / "divergence.png", dpi=200)
-        plt.close(fig)
-        written.append("divergence.png")
-
-    fig, ax = plt.subplots(figsize=(6, 3.6))
-    all_runs = [r for runs in groups.values() for r in runs]
-    per_run = [coordinator_stats(r) for r in all_runs]
-    cycles = max(len(s) for s in per_run)
-    for choice, color in CHOICE_COLORS.items():
-        ys = []
-        for i in range(cycles):
-            vals = [s[i]["shares"].get(choice, 0.0) for s in per_run if i < len(s)]
-            ys.append(100 * statistics.mean(vals))
-        ax.plot(
-            range(1, cycles + 1),
-            ys,
-            color=color,
-            linewidth=2,
-            marker="o",
-            markersize=5,
-            label=choice,
+    for condition, runs in groups.items():
+        domains = runs[0]["config"]["data"]["domains"]
+        specialists = list(SPECIALIST_COLORS)
+        fig, axes = plt.subplots(
+            1, len(domains), figsize=(3 * len(domains), 3), sharey=True
         )
-    ax.set_xlabel("Cycle")
-    ax.set_ylabel("Coordinator decisions (%)")
-    ax.legend(frameon=False, ncol=3, fontsize=8)
-    _style(ax)
-    fig.tight_layout()
-    fig.savefig(out / "coordinator_choices.png", dpi=200)
-    plt.close(fig)
-    written.append("coordinator_choices.png")
+        for ax, d in zip(axes, domains):
+            n = max(len(r["cycles"]) for r in runs)
+            for s in specialists:
+                ys = []
+                for i in range(n + 1):
+                    vals = []
+                    for run in runs:
+                        for a in run["agents"]:
+                            src = (
+                                run["baseline_validation_specialists"][a]
+                                if i == 0
+                                else (
+                                    run["cycles"][i - 1]["validation_specialists"][a]
+                                    if i - 1 < len(run["cycles"])
+                                    else None
+                                )
+                            )
+                            if src and d in src.get(s, {}):
+                                vals.append(src[s][d])
+                    ys.append(100 * statistics.mean(vals) if vals else float("nan"))
+                ax.plot(
+                    range(n + 1),
+                    ys,
+                    color=SPECIALIST_COLORS[s],
+                    linewidth=2,
+                    marker="o",
+                    markersize=4,
+                    label=s,
+                )
+            ax.set_title(d)
+            ax.set_xlabel("Cycle")
+            _style(ax)
+        axes[0].set_ylabel("Specialist alone, accuracy (%)")
+        axes[-1].legend(frameon=False, fontsize=8)
+        fig.tight_layout()
+        name = f"specialisation_{condition}.png"
+        fig.savefig(out / name, dpi=200)
+        plt.close(fig)
+        written.append(name)
     return written
 
 
 def analyze(runs_root: Path, out: Path) -> Path:
-    runs = load_runs(runs_root)
-    if not runs:
+    baseline, groups = load(runs_root)
+    if not groups and baseline is None:
         raise SystemExit(f"No finished runs under {runs_root}")
-    groups = by_condition(runs)
     out.mkdir(parents=True, exist_ok=True)
-    written = figures(groups, out)
+    written = figures(groups, out) if groups else []
+    names = [r["name"] for runs in groups.values() for r in runs]
     summary = "\n\n".join(
         [
             "# Results",
-            "Runs: " + ", ".join(r["name"] for r in runs),
-            "Values are mean ± SD across agents (pair: 2 agents × replicates; "
-            "solo: 1 agent × replicates).",
-            "## EvalPlus Pass@1 (%), whole agent (specialists + coordinator)",
-            evalplus_table(groups),
-            "## Single models under the official EvalPlus protocol (%)",
-            plain_table(groups),
-            "## Validation Pass@1 (%) by cycle",
-            validation_table(groups),
-            "## Learning during training",
-            training_table(groups),
-            "## Coordinator",
-            coordinator_table(groups),
-            "## Example sleep lessons (last cycle)",
-            lessons_section(groups),
+            "Runs: "
+            + (", ".join(names) or "none yet")
+            + (" · baseline: yes" if baseline else ""),
+            "Values are mean ± SD across agents (pair: 2 agents × replicates; solo: 1 agent × "
+            "replicates). Agent and specialist modes use a fixed subset per benchmark "
+            "(EvalPlus code benchmarks in full); plain mode uses full benchmarks.",
+            "## Benchmarks",
+            benchmark_table(baseline, groups),
+            "## Each specialist alone on the benchmarks (own persona)",
+            specialist_benchmark_table(baseline, groups),
+            "## Specialisation during training (validation, specialist alone)",
+            specialisation_table(groups) if groups else "_No runs yet._",
+            "## Learning dynamics",
+            learning_table(groups) if groups else "_No runs yet._",
             "## Figures",
             "\n".join(f"![{w}]({w})" for w in written),
         ]
