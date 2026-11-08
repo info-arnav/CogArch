@@ -64,7 +64,7 @@ class RunStore:
         total = cfg["experiment"]["cycles"]
         done = len(report["cycles"])
         current = min(done + 1, total)
-        is_baseline = run_dir.name == "baseline"
+        is_baseline = run_dir.name in ("baseline", "references")
         if report["final_benchmarks"] or (
             is_baseline and report["baseline_benchmarks"]
         ):

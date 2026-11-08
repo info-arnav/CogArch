@@ -80,6 +80,29 @@ def baseline(
 
 
 @app.command()
+def reference(
+    config: str = typer.Argument("config/general.yaml"),
+    model: str = typer.Option(
+        ..., help="Served model name, e.g. Qwen/Qwen2.5-7B-Instruct"
+    ),
+    label: str = typer.Option(..., help="Name in tables, e.g. 'Qwen2.5-7B'"),
+    base_url: str = typer.Option("http://localhost:8000/v1"),
+    majority: int = typer.Option(
+        1, help="Answers per problem for majority vote (1 = plain)"
+    ),
+) -> None:
+    """Score a reference system (bigger model, or majority vote) on the benchmarks."""
+    from src.references import evaluate_reference
+
+    cfg = load_config(config)
+    print(
+        asyncio.run(
+            evaluate_reference(cfg, label, model, base_url, majority, Console())
+        )
+    )
+
+
+@app.command()
 def dashboard(
     runs: str = typer.Option("data/runs", help="Directory containing run folders"),
     port: int = typer.Option(8080),

@@ -131,3 +131,56 @@ def plain_answerer(client: InferenceClient, model: str, max_tokens: int) -> Answ
         return extract_answer(task, reply)
 
     return answer
+
+
+def _same(task: Task, a: str, b: str) -> bool:
+    if task.kind == "code":
+        return " ".join(a.split()) == " ".join(b.split())
+    return answers_match(task, a, b)
+
+
+def majority_answerer(
+    client: InferenceClient,
+    model: str,
+    max_tokens: int,
+    samples: int,
+    temperature: float = 0.7,
+) -> Answerer:
+    """Self-consistency (Wang et al., 2023): sample several answers from one
+    model with no persona and return the most common one. Same prompts as the
+    plain protocol; code answers are grouped by identical (whitespace-normalised)
+    source, maths by math-verify equivalence, choices by letter. Ties go to the
+    earliest sample."""
+
+    async def answer(task: Task, sample: int) -> str:
+        if task.kind == "code":
+            prompt = f"{CODE_INSTRUCTION}\n```python\n{task.prompt.strip()}\n```"
+            messages = [Message(role="user", content=prompt)]
+        else:
+            messages = [Message(role="user", content=task_text(task))]
+        replies = await asyncio.gather(
+            *(
+                client.chat(
+                    messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    seed=sample * 1000 + i,
+                )
+                for i in range(samples)
+            )
+        )
+        answers = [a for a in (extract_answer(task, r) for r in replies) if a]
+        if not answers:
+            return ""
+        groups: list[list[str]] = []
+        for a in answers:
+            for g in groups:
+                if _same(task, g[0], a):
+                    g.append(a)
+                    break
+            else:
+                groups.append([a])
+        return max(groups, key=len)[0]
+
+    return answer
