@@ -1,20 +1,31 @@
-"""Who learns what from each task: competition between specialists.
+"""Who learns what from each task: learning rules taken from neuroscience.
 
-The brain specialises because regions compete for inputs, and the region that
-handles an input best is the one that learns from it (Jacobs' mixture of
-experts). Here, on every task whose correct answer became known:
+On every task whose correct answer became known (the world accepted an answer,
+or the partner agent shared one):
 
-  winners  specialists whose answer was right (in either round, any attempt).
-           Only they learn from the task: their correct reply is preferred
-           over a wrong one (their own if they were wrong at first, otherwise
-           a teammate's).
-  owner    if nobody was right, the specialist with the best running record in
-           this domain owns the task and learns the correct answer.
-  others   learn nothing from this task.
+1. Causality (spike-timing-dependent plasticity). A connection strengthens only
+   if the neuron fired *before* the outcome, i.e. helped cause it. Only a
+   specialist's OWN round-1 answer counts; agreeing after the discussion does not.
 
-The running record per (specialist, domain) is a reward-prediction-error
-update, like dopamine-trained values in the basal ganglia. Small initial
-differences (the personas) can grow into domain specialisation.
+2. Winner-take-all (lateral inhibition, competitive learning). Among the
+   specialists that solved the task alone, only one learns from it: the one with
+   the best adjusted record in this domain. If nobody solved it alone, the same
+   rule picks the domain's "owner", who learns the correct answer.
+
+3. Homeostasis (a "conscience", DeSieno 1988). Specialists that win often are
+   handicapped and rarely-winning ones helped, so no single specialist takes
+   over every domain:  adjusted = record + conscience × (1/N − win_rate).
+
+4. Attention tags (attention-gated reinforcement learning, Roelfsema). If the
+   coordinator adopted a specialist's answer and the world said it was wrong,
+   that specialist is blamed and learns the correct answer instead.
+
+5. Surprise (dopamine reward-prediction error). Pairs whose outcome was
+   surprising given the specialist's record (|outcome − record| > threshold)
+   are included twice, so unexpected results teach more.
+
+The running record per (specialist, domain) is itself a prediction-error update:
+v ← v + α (outcome − v).
 
 The coordinator learns separately: deciding for a position that was right is
 preferred over deciding for one that was wrong.
@@ -24,8 +35,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from src.environment import answers_match
 from src.inference.prompts import coordinator_endorsement
-from src.models.core import Decision, PreferencePair, Proposal, RoundResult
+from src.models.core import Decision, PreferencePair, Proposal, RoundResult, Task
 from src.training.community import proposal_key
 
 COORDINATOR = "coordinator"
@@ -33,13 +45,24 @@ MAX_COORDINATOR_PAIRS_PER_DECISION = 2
 
 
 class DomainRecords:
-    """Running success record per (specialist, domain): v ← v + α (outcome − v)."""
+    """Per-agent competition state: success records per (specialist, domain)
+    and how often each specialist has been the one that learns."""
 
-    def __init__(self, specialists: list[str], rate: float = 0.1, initial: float = 0.5):
+    def __init__(
+        self,
+        specialists: list[str],
+        rate: float = 0.1,
+        initial: float = 0.5,
+        conscience: float = 0.5,
+        win_rate_step: float = 0.05,
+    ) -> None:
         self.specialists = specialists
         self.rate = rate
         self.initial = initial
+        self.conscience = conscience
+        self.win_rate_step = win_rate_step
         self.values: dict[str, dict[str, float]] = {s: {} for s in specialists}
+        self.win_rate: dict[str, float] = {s: 1 / len(specialists) for s in specialists}
 
     def get(self, specialist: str, domain: str) -> float:
         return self.values[specialist].get(domain, self.initial)
@@ -48,12 +71,26 @@ class DomainRecords:
         value = self.get(specialist, domain)
         self.values[specialist][domain] = value + self.rate * (outcome - value)
 
-    def owner(self, domain: str) -> str:
-        """Highest record wins; ties go to the earlier specialist."""
-        return max(
-            self.specialists,
-            key=lambda s: (self.get(s, domain), -self.specialists.index(s)),
+    def adjusted(self, specialist: str, domain: str) -> float:
+        fair_share = 1 / len(self.specialists)
+        return self.get(specialist, domain) + self.conscience * (
+            fair_share - self.win_rate[specialist]
         )
+
+    def best(self, candidates: list[str], domain: str) -> str:
+        """Highest adjusted record; ties go to the earlier specialist."""
+        return max(
+            candidates,
+            key=lambda s: (self.adjusted(s, domain), -self.specialists.index(s)),
+        )
+
+    def owner(self, domain: str) -> str:
+        return self.best(self.specialists, domain)
+
+    def record_learners(self, learners: list[str]) -> None:
+        for s in self.specialists:
+            won = 1.0 if s in learners else 0.0
+            self.win_rate[s] += self.win_rate_step * (won - self.win_rate[s])
 
     def snapshot(self) -> dict[str, dict[str, float]]:
         return {s: dict(v) for s, v in self.values.items()}
@@ -63,16 +100,22 @@ def _correctness(r: RoundResult, agent: str) -> dict[str, bool]:
     return r.correct.get(agent, {})
 
 
-def _proposals(d: Decision) -> list[Proposal]:
-    return [*d.round1, *d.round2]
+def _adopted(task: Task, final: str, proposal: Proposal) -> bool:
+    """Did the coordinator's final answer come from this specialist's position?"""
+    if task.kind == "code":
+        return " ".join(final.split()) == " ".join(proposal.answer.split())
+    return answers_match(task, final, proposal.answer)
 
 
 def build_pairs(
     rounds: list[RoundResult],
     agent: str,
     records: DomainRecords,
+    winner_take_all: bool = True,
+    blame_adopted: bool = True,
+    surprise_threshold: float | None = 0.5,
 ) -> dict[str, list[PreferencePair]]:
-    """Preference pairs per role for one agent; updates its domain records."""
+    """Preference pairs per role for one agent; updates its competition state."""
     pairs: dict[str, list[PreferencePair]] = {
         role: [] for role in [*records.specialists, COORDINATOR]
     }
@@ -88,42 +131,80 @@ def build_pairs(
         def verdict(d: Decision, p: Proposal) -> bool | None:
             return correct.get(proposal_key(d.attempt_number, p.round, p.specialist))
 
-        judged = [(d, p, verdict(d, p)) for d in decisions for p in _proposals(d)]
-        winners = [
+        # 1. Causality: only independent (round-1) answers count.
+        judged = [(d, p, verdict(d, p)) for d in decisions for p in d.round1]
+        solved_alone = [
             s
             for s in records.specialists
             if any(v and p.specialist == s for _, p, v in judged)
         ]
+        expected = {s: records.get(s, domain) for s in records.specialists}
+
+        # 2–3. Winner-take-all with homeostasis (or every solo winner, if disabled).
+        if solved_alone:
+            learners = (
+                [records.best(solved_alone, domain)]
+                if winner_take_all
+                else solved_alone
+            )
+        else:
+            learners = [records.owner(domain)]
+        roles = {s: ("winner" if s in solved_alone else "owner") for s in learners}
+
+        # 4. Attention tags: specialists whose position the coordinator adopted
+        #    on a decision the world rejected.
+        if blame_adopted:
+            for d in decisions:
+                if d.result.passed:
+                    continue
+                for p in d.round2:
+                    if p.specialist not in roles and _adopted(r.task, d.answer, p):
+                        roles[p.specialist] = "blamed"
+
         for s in records.specialists:
             if any(p.specialist == s and v is not None for _, p, v in judged):
-                records.update(s, domain, 1.0 if s in winners else 0.0)
-        responsible = winners or [records.owner(domain)]
+                records.update(s, domain, 1.0 if s in solved_alone else 0.0)
+        records.record_learners(list(roles))
 
-        for s in responsible:
+        for s, responsibility in roles.items():
             own_right = next((p for _, p, v in judged if p.specialist == s and v), None)
             own_wrong = next(
                 (p for _, p, v in judged if p.specialist == s and v is False), None
             )
+            own_adopted_wrong = next(
+                (
+                    p
+                    for d in decisions
+                    if not d.result.passed
+                    for p in d.round2
+                    if p.specialist == s and _adopted(r.task, d.answer, p)
+                ),
+                None,
+            )
             mate_wrong = next(
                 (p for _, p, v in judged if p.specialist != s and v is False), None
             )
-            rejected = own_wrong or mate_wrong
+            rejected = own_wrong or own_adopted_wrong or mate_wrong
             if rejected is None:
                 continue
             chosen = own_right.response if own_right else known.response
-            pairs[s].append(
-                PreferencePair(
-                    task_id=r.task.task_id,
-                    domain=domain,
-                    agent=agent,
-                    role=s,
-                    prompt=decisions[0].specialist_prompts[s],
-                    chosen=chosen,
-                    rejected=rejected.response,
-                    source=source,
-                    responsibility="winner" if s in winners else "owner",
-                )
+            pair = PreferencePair(
+                task_id=r.task.task_id,
+                domain=domain,
+                agent=agent,
+                role=s,
+                prompt=decisions[0].specialist_prompts[s],
+                chosen=chosen,
+                rejected=rejected.response,
+                source=source,
+                responsibility=responsibility,
             )
+            outcome = 1.0 if responsibility == "winner" else 0.0
+            surprising = (
+                surprise_threshold is not None
+                and abs(outcome - expected[s]) > surprise_threshold
+            )
+            pairs[s].extend([pair, pair] if surprising else [pair])
 
         for d in decisions:
             good = [p for p in d.round2 if verdict(d, p)]

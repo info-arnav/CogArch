@@ -30,8 +30,11 @@ graph TD
 | Specialised regions process in parallel | Four specialists with their own LoRA weights; personas are only the initial bias |
 | Global workspace: specialists share a stage, content is broadcast | Discussion round: each specialist sees the others' answers and revises |
 | Prefrontal cortex integrates | Coordinator LLM weighs the final positions and writes the answer |
-| Regions compete; the one that wins an input learns from it (mixture of experts) | Only specialists that were right learn from a task; if nobody was, the domain's best performer ("owner") learns it |
-| Dopamine prediction errors update values | Running record per specialist and domain: v ← v + α(outcome − v) |
+| Spike-timing plasticity: only neurons that fired *before* the outcome strengthen | Only a specialist's own round-1 answer counts, not agreeing after the discussion |
+| Lateral inhibition: one winner learns (competitive learning) | Only the best solo winner learns each task; if nobody solved it alone, the domain's "owner" does |
+| Homeostasis: frequent winners become less excitable | A "conscience" handicaps specialists that win often, so none takes over every domain |
+| Attention-gated feedback tags the units behind the chosen action | A specialist whose adopted answer was wrong is blamed and learns the correct one |
+| Dopamine prediction errors update values, more for surprises | Running record per specialist and domain: v ← v + α(outcome − v); surprising outcomes count twice |
 | Hippocampus → cortex during sleep | Episodic memory, ExpeL-style lesson editing, then DPO + NLL fine-tuning |
 | Learning from others | Accepted answers are shared between the two agents |
 

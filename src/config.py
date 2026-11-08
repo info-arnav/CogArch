@@ -82,6 +82,19 @@ class TrainingConfig(BaseModel):
     grad_accumulation: int = 1
     max_length: int = 3072
     min_pairs: int = 4
+    winner_take_all: bool = Field(
+        default=True, description="Only the best solo winner learns each task"
+    )
+    conscience: float = Field(
+        default=0.5, description="Homeostasis: handicap for specialists that win often"
+    )
+    blame_adopted: bool = Field(
+        default=True,
+        description="A specialist whose adopted answer was wrong learns the correct one",
+    )
+    surprise_threshold: float | None = Field(
+        default=0.5, description="Surprising pairs count twice (None disables)"
+    )
     global_slots: int = Field(
         default=4,
         description="DPO jobs allowed at once on this machine, across all runs",

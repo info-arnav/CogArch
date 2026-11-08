@@ -65,7 +65,7 @@ evaluation:
   plain: true
 
 experiment:
-  name: general-pair
+  name: v2-pair
   cycles: 5
   rounds_per_cycle: 100     # 25 per domain
   round_batch_size: 4

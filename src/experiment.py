@@ -125,7 +125,9 @@ class Experiment:
                 probes_per_problem=self.cfg.environment.probes_per_problem,
                 discussion=self.cfg.agents.discussion,
             )
-            self.records[name] = DomainRecords(list(self.specialist_personas))
+            self.records[name] = DomainRecords(
+                list(self.specialist_personas), conscience=self.cfg.training.conscience
+            )
 
     def _curriculum(self) -> Curriculum:
         return Curriculum(
@@ -325,7 +327,14 @@ class Experiment:
     ) -> list[tuple[str, str]]:
         jobs = {}
         for name, agent in self.agents.items():
-            pairs = build_pairs(rounds, name, self.records[name])
+            pairs = build_pairs(
+                rounds,
+                name,
+                self.records[name],
+                winner_take_all=self.cfg.training.winner_take_all,
+                blame_adopted=self.cfg.training.blame_adopted,
+                surprise_threshold=self.cfg.training.surprise_threshold,
+            )
             metrics.domain_records[name] = self.records[name].snapshot()
             metrics.preference_pairs[name] = {role: len(p) for role, p in pairs.items()}
             metrics.pairs_by_domain[name] = {
