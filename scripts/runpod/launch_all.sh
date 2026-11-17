@@ -5,7 +5,7 @@
 # GPU 0 holds the grader and runs only the baselines.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-export HF_HOME=/workspace/hf
+export HF_HOME=/workspace/hf OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 OPENBLAS_NUM_THREADS=8 RAYON_NUM_THREADS=8 TOKENIZERS_PARALLELISM=false
 LOGS=/workspace/logs; mkdir -p "$LOGS"
 GPUS=$(nvidia-smi -L | wc -l)
 FIRST=$([ -n "${GRADER_URL:-}" ] && echo 0 || echo 1)

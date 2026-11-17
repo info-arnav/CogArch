@@ -4,7 +4,7 @@
 # Prints whether each part of the design actually ran.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-export HF_HOME=/workspace/hf
+export HF_HOME=/workspace/hf OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 OPENBLAS_NUM_THREADS=8 RAYON_NUM_THREADS=8 TOKENIZERS_PARALLELISM=false
 LOGS=/workspace/logs; mkdir -p "$LOGS"
 rm -rf data/runs/check-r1
 G=$(( $(nvidia-smi -L | wc -l) - 1 ))

@@ -3,7 +3,7 @@
 # server, graded like the trained teams.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-export HF_HOME=/workspace/hf
+export HF_HOME=/workspace/hf OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 OPENBLAS_NUM_THREADS=8 RAYON_NUM_THREADS=8 TOKENIZERS_PARALLELISM=false
 LOGS=/workspace/logs; mkdir -p "$LOGS"
 URL=http://localhost:8200/v1
 INFERENCE_BASE_URL=$URL VERIFIER_URL=${GRADER_URL:-http://localhost:8300/v1} python3 -m cli.main baseline config/general.yaml > "$LOGS/baseline-team.log" 2>&1
