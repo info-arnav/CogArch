@@ -18,6 +18,7 @@ RUNS=(
   solo:1 solo:2 solo:3
   no-star:1 no-practice:1 no-replay:1
 )
+if [ -n "${RUN_LIST:-}" ]; then read -ra RUNS <<< "$RUN_LIST"; fi
 i=0
 for run in "${RUNS[@]}"; do
   config=${run%%:*}; replicate=${run##*:}; gpu=$((FIRST + i % (GPUS - FIRST)))
