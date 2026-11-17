@@ -201,4 +201,7 @@ retrieval of similar trajectories).
   another problem from the same group of 20, solved moments earlier.
 - Training without gradient checkpointing was tried and does not fit: two
   training jobs beside the model server ran out of memory on a 48 GB GPU in the
-  quick check, so checkpointing stays on.
+  quick check, so checkpointing stays on. Even with it, two jobs beside the
+  server ran out of memory on the 44 GB usable on an L40S, so each training
+  step now takes one pair at a time and accumulates two (the same effective
+  batch of two pairs and the same learning rate).

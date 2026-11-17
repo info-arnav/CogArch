@@ -17,6 +17,7 @@ experiment can show it live. On a GPU training runs in bfloat16; elsewhere
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -44,6 +45,7 @@ class DPOJob(BaseModel):
 
 
 def run(job: DPOJob) -> None:
+    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     import torch
     from datasets import load_dataset
     from peft import LoraConfig, PeftModel

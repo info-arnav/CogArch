@@ -45,8 +45,8 @@ training:
   beta: 0.1
   nll_weight: 1.0           # DPO + NLL on chosen (Pang et al., 2024)
   epochs: 3
-  batch_size: 2
-  grad_accumulation: 1
+  batch_size: 1
+  grad_accumulation: 2
   max_length: 3072
   min_pairs: 4
   global_slots: 2
