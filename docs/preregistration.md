@@ -168,3 +168,28 @@ Tested on the stored memories of the earlier runs (500 problems each):
 
 The memory ablation therefore tests episodic memory (Reflexion; ExpeL's
 retrieval of similar trajectories).
+
+### Revision before the full runs: the coordinator replies with a letter (17 November 2026)
+
+- The coordinator reads the problem, every position and the checked results,
+  and replies with one letter (W, X, Y or Z), or "none" to send the team back
+  once. The reply is constrained to those options, and its probability for each
+  is logged. The basal ganglia select a channel without composing reasoning of
+  their own; the reasoning is the specialists'.
+- Its training pairs are single letters: its real choice against an option it
+  could have taken, preferring whichever was right. Before this, half of each
+  pair was a written sentence the coordinator never produced, so preference
+  training could reward the wording rather than whom it trusted, and 18% of its
+  choices named an answer instead of a letter, leaving whom it meant to a guess.
+- The coordinator's instructions no longer list its letters. With the list
+  "(W, X, Y, Z)", the first letter listed was almost never chosen whichever
+  specialist held it (8 to 13 of 400 choices, in three arrangements; the same
+  held for K-N, P-S and scattered letters), a known recency bias in language
+  models (Zhao et al. 2021). Without the list, over four arrangements of 400
+  problems each, the letters were chosen 19%, 25%, 25% and 31% of the time,
+  while the specialist most often right was chosen most often whichever letter
+  it held. Each specialist keeps its letter for the whole run; the remaining
+  letter preference is the coordinator's starting point, reported from the
+  logged choices.
+- The plain model is scored on the same benchmark subsets as every other
+  system.

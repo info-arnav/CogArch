@@ -28,8 +28,8 @@ by = Counter(d["chosen_by"] for d in decisions)
 report = json.load(open("data/runs/check-r1/report.json"))
 replayed = report["cycles"][-1].get("replayed", {})
 checks = {
-    "every answer went through the coordinator": by.get("coordinator", 0) + by.get("coordinator_answer", 0) + by.get("fallback", 0) == len(decisions) > 0,
-    "coordinator made the choice itself (>=95%)": by.get("coordinator", 0) + by.get("coordinator_answer", 0) >= 0.95 * len(decisions),
+    "every answer went through the coordinator": by.get("coordinator", 0) + by.get("fallback", 0) == len(decisions) > 0,
+    "coordinator replied with a valid letter every time": by.get("coordinator", 0) == len(decisions),
     "coordinator never told the subject or a track record": coord and not any("track record" in r["request"]["messages"][-1]["content"].lower() for r in coord),
     "memory stored episodes": kinds["memory_write"] > 0,
     "adapters trained and loaded": kinds["adapter"] > 0,
@@ -46,6 +46,8 @@ checks = {
     "grader verdicts logged": ck["graded"] > 0,
     "code executions logged": ck["execution"] > 0,
     "team decisions logged with every specialist graded": decided and all(len(r["first_correct"]) == 4 for r in decided),
+    "coordinator replies constrained to the options, with probabilities logged": coord and all(r["request"].get("guided_choice") and r.get("logprobs") for r in coord if r.get("step") == "decide"),
+    "coordinator pairs are single letters": all(json.loads(l)["chosen"][0]["content"] in {"W", "X", "Y", "Z", "none"} and json.loads(l)["rejected"][0]["content"] in {"W", "X", "Y", "Z", "none"} for a in ("a", "b") for c in (1, 2) if os.path.exists(f"data/runs/check-r1/adapters/{a}/coordinator/cycle_{c}_new.jsonl") for l in open(f"data/runs/check-r1/adapters/{a}/coordinator/cycle_{c}_new.jsonl") if l.strip()),
     "memory snapshots saved each cycle": all(os.path.isdir(f"data/runs/check-r1/memory_snapshots/cycle_{c}") for c in (1, 2)),
 }
 for name, ok in checks.items():

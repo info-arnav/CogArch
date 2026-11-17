@@ -1,7 +1,7 @@
 """Prompt building and parsing."""
 
 from src.inference.prompts import (
-    coordinator_endorsement,
+    choice_options,
     coordinator_messages,
     discussion_messages,
     evidence_text,
@@ -93,7 +93,7 @@ def test_discussion_and_choice_prompts(math_task):
     choose = coordinator_messages(load_coordinator(), math_task, [own, mate], evidence)[
         -1
     ].content
-    assert "### logical" in choose and "FINAL CHOICE: <name>" in choose
+    assert "### logical" in choose and "Reply with only the letter" in choose
     assert "logical, creative" in choose
 
 
@@ -107,13 +107,6 @@ def test_long_reasoning_shows_its_end(math_task):
     assert "… " + "z" * 900 in text and "a" * 10 not in text
 
 
-def test_parse_choice():
-    names = ["logical", "creative", "skeptical", "empathetic"]
-    assert parse_choice("blah\nFINAL CHOICE: **Skeptical**", names) == "skeptical"
-    assert parse_choice("I go with creative.", names) == "creative"
-    assert parse_choice("no idea", names) is None
-
-
 def test_code_evidence_lists_examples_and_groups(add_task):
     evidence = Evidence(
         answers={"logical": "x", "creative": "y"},
@@ -125,18 +118,14 @@ def test_code_evidence_lists_examples_and_groups(add_task):
     assert "identical outputs" in text
 
 
-def test_endorsement_names_the_letter():
-    text = coordinator_endorsement("Y")
-    assert text.startswith("Y's reasoning holds up")
-    assert text.endswith("FINAL CHOICE: Y")
-
-
-def test_parse_choice_by_letter():
-    letters = ["W", "X", "Y", "Z"]
-    assert parse_choice("FINAL CHOICE: **y**", letters) == "Y"
-    assert parse_choice("FINAL CHOICE: none", letters, may_reject=True) == "none"
-    assert parse_choice("A careful look says I choose X.", letters) == "X"
-    assert parse_choice("FINAL ANSWER: B", letters) is None
+def test_choice_options_and_parse():
+    options = choice_options(["W", "X", "Y", "Z"], may_reject=True)
+    assert options == ["W", "X", "Y", "Z", "none"]
+    assert choice_options(["W", "X"], may_reject=False) == ["W", "X"]
+    assert parse_choice(" y\n", options) == "Y"
+    assert parse_choice("none", options) == "none"
+    assert parse_choice("FINAL CHOICE: Y", options) is None
+    assert parse_choice("B", options) is None
 
 
 def test_parse_probes_from_any_block():

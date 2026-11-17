@@ -27,8 +27,9 @@ or the partner agent shared one):
 The running record per (specialist, domain) is itself a prediction-error update:
 v ← v + α (outcome − v).
 
-The coordinator learns separately: deciding for a position that was right is
-preferred over deciding for one that was wrong.
+The coordinator learns separately, from its own choices: each pair is two
+single letters (or 'none'), its real choice against an option it could have
+taken, preferring whichever was right.
 
 Anchors keep every specialist practised in every domain: a specialist whose own
 first answer was right, on a task it did not learn from, also gets that answer
@@ -43,7 +44,7 @@ import math
 from collections import defaultdict
 from typing import Any
 
-from src.inference.prompts import coordinator_endorsement, coordinator_rejection
+from src.inference.prompts import REJECT_ALL
 from src.models.core import (
     Decision,
     Message,
@@ -280,34 +281,7 @@ def build_pairs(
                         source=source,
                     )
                 )
-            good = [p for p in d.round2 if verdict(d, p)]
-            bad = [p for p in d.round2 if verdict(d, p) is False]
-            chose_right = d.chosen in {p.specialist for p in good}
-            decided = d.chosen_by in ("coordinator", "coordinator_answer")
-            own = (
-                d.coordinator_output
-                if d.chosen_by == "coordinator"
-                else coordinator_endorsement(d.labels[d.chosen])
-            )
-            if decided and chose_right:
-                options = [
-                    (own, coordinator_endorsement(d.labels[p.specialist])) for p in bad
-                ]
-            elif not good and bad and d.could_reject and decided:
-                options = [(coordinator_rejection(), d.coordinator_output)]
-            elif good and not chose_right:
-                options = [
-                    (
-                        coordinator_endorsement(d.labels[good[0].specialist]),
-                        d.coordinator_output
-                        or coordinator_endorsement(d.labels[d.chosen]),
-                    )
-                ]
-            else:
-                options = []
-            for chosen_text, rejected_text in options[
-                :MAX_COORDINATOR_PAIRS_PER_DECISION
-            ]:
+            for chosen_text, rejected_text in _choice_pairs(d, verdict):
                 pairs[COORDINATOR].append(
                     PreferencePair(
                         task_id=r.task.task_id,
@@ -325,30 +299,44 @@ def build_pairs(
     return pairs
 
 
+def _choice_pairs(d: Decision, verdict: Any) -> list[tuple[str, str]]:
+    """The coordinator's final choice against the alternatives it had, each a
+    single letter (or 'none'), so a pair differs only in whom it trusted. Its
+    real choice is in every pair; the other side is an option it could have
+    taken. Decisions where it gave no valid reply teach it nothing."""
+    if d.chosen_by != "coordinator":
+        return []
+    good = [d.labels[p.specialist] for p in d.round2 if verdict(d, p)]
+    bad = [d.labels[p.specialist] for p in d.round2 if verdict(d, p) is False]
+    own = d.labels[d.chosen]
+    if own in good:
+        pairs = [(own, other) for other in bad]
+    elif good:
+        pairs = [(right, own) for right in good]
+    elif bad and d.could_reject:
+        pairs = [(REJECT_ALL, own)]
+    else:
+        pairs = []
+    return pairs[:MAX_COORDINATOR_PAIRS_PER_DECISION]
+
+
 def _rejection_pairs(d: Decision, verdict: Any) -> list[tuple[list[Message], str, str]]:
     """When the coordinator sent the team back: right to do so if no first
     answer was correct, wrong if one was."""
-    if not d.rejected_all or not d.first_choice_output:
+    if not d.rejected_all or not d.first_choice_prompt:
         return []
-    good = [p for p in d.round1 if verdict(d, p)]
-    bad = [p for p in d.round1 if verdict(d, p) is False]
+    good = [d.labels[p.specialist] for p in d.round1 if verdict(d, p)]
+    bad = [d.labels[p.specialist] for p in d.round1 if verdict(d, p) is False]
     if good:
-        return [
-            (
-                d.first_choice_prompt,
-                coordinator_endorsement(d.labels[good[0].specialist]),
-                d.first_choice_output,
-            )
-        ]
-    if bad:
-        return [
-            (
-                d.first_choice_prompt,
-                d.first_choice_output,
-                coordinator_endorsement(d.labels[bad[0].specialist]),
-            )
-        ]
-    return []
+        pairs = [(right, REJECT_ALL) for right in good]
+    elif bad:
+        pairs = [(REJECT_ALL, wrong) for wrong in bad]
+    else:
+        pairs = []
+    return [
+        (d.first_choice_prompt, chosen, rejected)
+        for chosen, rejected in pairs[:MAX_COORDINATOR_PAIRS_PER_DECISION]
+    ]
 
 
 def _spread(pairs: list[PreferencePair], limit: int) -> list[PreferencePair]:

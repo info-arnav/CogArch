@@ -52,11 +52,18 @@ class ScriptedChat:
         max_tokens: int,
         seed: int,
         on_delta=None,  # noqa: ANN001
+        choices=None,  # noqa: ANN001
     ) -> str:
         role = role_of(messages[0].content)
         stage = stage_of(role, messages[-1].content)
         self.calls.append(
-            {"messages": messages, "role": role, "stage": stage, "seed": seed}
+            {
+                "messages": messages,
+                "role": role,
+                "stage": stage,
+                "seed": seed,
+                "choices": choices,
+            }
         )
         return self.reply(role, stage, messages[-1].content)
 

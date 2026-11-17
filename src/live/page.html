@@ -714,7 +714,7 @@ function renderHealth() {
 
   const decided = rounds.filter(x => x.at.decision);
   const by = k => decided.filter(x => x.at.decision.chosen_by === k).length;
-  add("Discussion only when needed", decided.length ? pct(decided.filter(x => x.at.decision.discussed).length / decided.length) + " discussed" : "–", decided.length ? "pass" : "wait", decided.length ? `${by("agreement")} attempts agreed straight away, ${by("coordinator") + by("coordinator_answer")} were chosen by the coordinator (${by("coordinator_answer")} by naming the answer), ${by("fallback")} fell back because the coordinator named no valid position.` : "Needs a few problems.");
+  add("Discussion only when needed", decided.length ? pct(decided.filter(x => x.at.decision.discussed).length / decided.length) + " discussed" : "–", decided.length ? "pass" : "wait", decided.length ? `${by("agreement")} attempts agreed straight away, ${by("coordinator")} were chosen by the coordinator, ${by("fallback")} fell back because the coordinator gave no valid letter.` : "Needs a few problems.");
   add("Coordinator names a valid position", decided.length - by("agreement") ? pct(1 - by("fallback") / (decided.length - by("agreement"))) : "–", !(decided.length - by("agreement")) ? "wait" : by("fallback") / (decided.length - by("agreement")) <= .05 ? "pass" : "warn", "When it doesn't, the largest agreeing group is submitted instead.");
   const codeChosen = decided.filter(x => x.task.kind === "code" && x.at.decision.evidence.examples[x.at.decision.chosen]);
   const failingChosen = codeChosen.filter(x => { const e = x.at.decision.evidence.examples[x.at.decision.chosen]; return e[0] < e[1] && Object.values(x.at.decision.evidence.examples).some(o => o[0] === o[1]); }).length;

@@ -41,6 +41,7 @@ class ChatModel(Protocol):
         max_tokens: int,
         seed: int,
         on_delta: OnDelta | None = None,
+        choices: list[str] | None = None,
     ) -> str: ...
 
 
@@ -68,12 +69,14 @@ class InferenceClient:
         return usage
 
     async def _logged(
-        self, payload: dict[str, Any], call: Awaitable[tuple[str, dict | None]]
+        self,
+        payload: dict[str, Any],
+        call: Awaitable[tuple[str, dict[str, Any]]],
     ) -> str:
         """Run a request and add it, input and output, to the run's call log."""
         start = time.perf_counter()
         try:
-            text, usage = await call
+            text, details = await call
         except BaseException as error:
             calllog.record(
                 "model",
@@ -88,7 +91,7 @@ class InferenceClient:
             server=str(self._client.base_url),
             request=payload,
             output=text,
-            usage=usage,
+            **details,
             seconds=round(time.perf_counter() - start, 3),
         )
         return text
@@ -101,34 +104,44 @@ class InferenceClient:
         max_tokens: int,
         seed: int,
         on_delta: OnDelta | None = None,
+        choices: list[str] | None = None,
     ) -> str:
-        payload = {
+        """With `choices`, the reply is constrained to exactly one of them
+        (vLLM guided decoding) and the model's probabilities for its first
+        token are logged."""
+        payload: dict[str, Any] = {
             "model": model,
             "messages": [m.model_dump() for m in messages],
             "temperature": temperature,
             "max_tokens": max_tokens,
             "seed": seed,
         }
+        if choices is not None:
+            payload |= {"guided_choice": choices, "logprobs": True, "top_logprobs": 10}
+            on_delta = None
         return await self._logged(payload, self._chat(payload, on_delta))
 
     async def _chat(
         self, payload: dict, on_delta: OnDelta | None
-    ) -> tuple[str, dict | None]:
+    ) -> tuple[str, dict[str, Any]]:
         async with self._slots:
             if on_delta is not None:
                 return await self._stream(payload, on_delta)
             response = await self._post_with_retry("/chat/completions", payload)
         return self._reply(response)
 
-    def _reply(self, response: httpx.Response) -> tuple[str, dict | None]:
+    def _reply(self, response: httpx.Response) -> tuple[str, dict[str, Any]]:
         response.raise_for_status()
         body = response.json()
-        usage = self._count(body.get("usage"))
-        return str(body["choices"][0]["message"]["content"] or ""), usage
+        choice = body["choices"][0]
+        details: dict[str, Any] = {"usage": self._count(body.get("usage"))}
+        if choice.get("logprobs"):
+            details["logprobs"] = choice["logprobs"]
+        return str(choice["message"]["content"] or ""), details
 
     async def _stream(
         self, payload: dict, on_delta: OnDelta
-    ) -> tuple[str, dict | None]:
+    ) -> tuple[str, dict[str, Any]]:
         """The reply as server-sent events. A dropped connection before the
         first token is retried; after it, the request fails."""
         waited, attempt = 0.0, 0
@@ -160,7 +173,7 @@ class InferenceClient:
                         if delta:
                             parts.append(delta)
                             on_delta(delta)
-                return "".join(parts), self._count(usage)
+                return "".join(parts), {"usage": self._count(usage)}
             except httpx.TransportError:
                 if parts or waited >= SERVER_WAIT_SECONDS:
                     raise
@@ -188,7 +201,7 @@ class InferenceClient:
         }
         return await self._logged(payload, self._complete(payload))
 
-    async def _complete(self, payload: dict) -> tuple[str, dict | None]:
+    async def _complete(self, payload: dict) -> tuple[str, dict[str, Any]]:
         async with self._slots:
             response = await self._post_with_retry("/chat/completions", payload)
         return self._reply(response)

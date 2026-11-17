@@ -60,7 +60,10 @@ class FakeClient:
         max_tokens: int,
         seed: int,
         on_delta=None,  # noqa: ANN001
+        choices=None,  # noqa: ANN001
     ) -> str:
+        if choices is not None:
+            return str(choices[seed % len(choices)])
         system, user = messages[0].content, messages[-1].content
         role = role_of(system)
         if role == "reflect":

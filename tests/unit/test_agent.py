@@ -12,7 +12,7 @@ def math_team(role: str, stage: str, user: str) -> str:
     """Round 1: only skeptical is right. After discussion, logical joins it.
     The coordinator chooses skeptical."""
     if role == "coordinator":
-        return "Skeptical's reasoning holds up.\nFINAL CHOICE: Y"
+        return "Y"
     if role == "skeptical" or (role == "logical" and stage == "round2"):
         return "6*7 = \\boxed{42}"
     return "6*7 = \\boxed{36}"
@@ -35,7 +35,7 @@ async def test_disagreement_is_discussed_and_a_position_chosen(math_task):
 
 async def test_coordinator_decides_even_when_all_agree(math_task):
     def team(role: str, stage: str, user: str) -> str:
-        return "FINAL CHOICE: X" if role == "coordinator" else "\\boxed{42}"
+        return "X" if role == "coordinator" else "\\boxed{42}"
 
     d = (
         await make_agent(ScriptedChat(team), discussion="disagreement").solve(math_task)
@@ -90,7 +90,7 @@ async def test_code_evidence_and_retry_after_wrong(add_task):
         if role == "probes":
             return "add(1, 2)\nadd(0, 0)"
         if role == "coordinator":
-            return "FINAL CHOICE: W" if "previous answer" in user else "FINAL CHOICE: X"
+            return "W" if "previous answer" in user else "X"
         if role == "logical" and "previous answer" in user:
             return code_reply(RIGHT + "\nprint(add(1, 2))")
         return (
@@ -151,9 +151,9 @@ async def test_solo_answer_returns_that_specialists_reply(math_task):
 async def test_coordinator_can_send_the_team_back_once(math_task):
     def team(role: str, stage: str, user: str) -> str:
         if role == "coordinator":
-            if "none." in user and "try again" in user:
-                return "All wrong.\nFINAL CHOICE: none"
-            return "FINAL CHOICE: Y"
+            if "reply none" in user:
+                return "none"
+            return "Y"
         if "rejected every answer" in user:
             return "\\boxed{42}" if role == "skeptical" else "\\boxed{40}"
         return "\\boxed{36}" if role != "logical" else "\\boxed{35}"
@@ -162,21 +162,29 @@ async def test_coordinator_can_send_the_team_back_once(math_task):
         await make_agent(ScriptedChat(team), discussion="never").solve(math_task)
     ).decisions[0]
     assert d.rejected_all and not d.could_reject
-    assert "FINAL CHOICE: none" in d.first_choice_output
+    assert d.first_choice_output == "none"
     assert {p.specialist: p.answer for p in d.round1}["skeptical"] == "36"
     assert {p.specialist: p.answer for p in d.round2}["skeptical"] == "42"
     assert d.chosen == "skeptical" and d.answer == "42"
-    assert ", none." not in d.coordinator_prompt[-1].content
+    assert "reply none" not in d.coordinator_prompt[-1].content
 
 
-async def test_coordinator_naming_an_answer_selects_who_gave_it(choice_task):
+async def test_coordinator_is_offered_only_the_letters(choice_task):
+    chat = ScriptedChat(math_team)
+    await make_agent(chat, discussion="never").solve(choice_task)
+    offered = [c["choices"] for c in chat.calls if c["role"] == "coordinator"]
+    assert offered and offered[0] == ["W", "X", "Y", "Z", "none"]
+    assert all(c["choices"] is None for c in chat.calls if c["role"] != "coordinator")
+
+
+async def test_a_reply_that_is_not_exactly_a_letter_is_not_read_as_one(choice_task):
     def team(role: str, stage: str, user: str) -> str:
         if role == "coordinator":
-            return "FINAL CHOICE: B"
+            return "FINAL CHOICE: Y"
         return "FINAL ANSWER: B" if role == "skeptical" else "FINAL ANSWER: A"
 
     d = (await make_agent(ScriptedChat(team)).solve(choice_task)).decisions[0]
-    assert d.chosen == "skeptical" and d.chosen_by == "coordinator_answer"
+    assert d.chosen_by == "fallback"
 
 
 async def test_unnamed_choice_falls_back_to_the_largest_group(choice_task):

@@ -344,12 +344,12 @@ class Experiment:
         results: list[BenchmarkScores] = []
 
         async def run(
-            system: str, mode: str, answerer: scoring.Answerer, samples: int, full: bool
+            system: str, mode: str, answerer: scoring.Answerer, samples: int
         ) -> None:
             entry = BenchmarkScores(system=system, mode=mode)
             for bench in ev.benchmarks:
                 tasks = BENCHMARKS[bench]()
-                if not full and bench not in EVALPLUS_BENCHMARKS:
+                if bench not in EVALPLUS_BENCHMARKS:
                     tasks = benchmark_subset(tasks, ev.max_items, ev.subset_seed)
                 self.console.print(
                     f"  {stage} · {mode} · {system} · {bench} ({len(tasks)})"
@@ -385,20 +385,15 @@ class Experiment:
 
         for name in agents:
             agent = self.agents[name]
-            await run(
-                f"agent {name}", "agent", self._team(agent), ev.samples, full=False
-            )
+            await run(f"agent {name}", "agent", self._team(agent), ev.samples)
             if ev.specialists:
                 for s in agent.specialists:
-                    await run(
-                        f"{name}/{s}", "specialist", _solo(agent, s), 1, full=False
-                    )
+                    await run(f"{name}/{s}", "specialist", _solo(agent, s), 1)
                     await run(
                         f"{name}/{s}",
                         "specialist_neutral",
                         _solo(agent, s, persona=False),
                         1,
-                        full=False,
                     )
         if ev.plain:
             models = (
@@ -419,7 +414,6 @@ class Experiment:
                         self.client, model, self.cfg.model.max_tokens
                     ),
                     1,
-                    full=True,
                 )
         return results
 

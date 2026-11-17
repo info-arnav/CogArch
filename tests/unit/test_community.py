@@ -40,7 +40,7 @@ class TestShareDiscoveries:
 def solver(role: str, stage: str, user: str) -> str:
     """Agent a: skeptical right from round 1; coordinator chooses it."""
     if role == "coordinator":
-        return "FINAL CHOICE: Y"
+        return "Y"
     return "\\boxed{42}" if role == "skeptical" else "\\boxed{36}"
 
 
@@ -48,7 +48,7 @@ def struggler(role: str, stage: str, user: str) -> str:
     """Agent b: only empathetic gets it, and only after discussion; the
     coordinator chooses creative's wrong position."""
     if role == "coordinator":
-        return "FINAL CHOICE: X"
+        return "X"
     if role == "empathetic" and stage == "round2":
         return "\\boxed{42}"
     return "\\boxed{36}"
@@ -83,11 +83,17 @@ async def test_round_credit_and_competitive_pairs(math_task):
     pair = pairs_b["logical"][0]
     assert pair.source == "a" and "42" in pair.chosen and "36" in pair.rejected
     assert records_b.get("empathetic", "math") < 0.5
-    # The coordinator should still have sided with empathetic's revised position.
-    assert pairs_b[COORDINATOR][0].chosen.startswith("Z's reasoning")
+    # The coordinator should have sided with empathetic's revised position; the
+    # pair is its real choice against that one, letter for letter.
+    assert [(p.chosen, p.rejected) for p in pairs_b[COORDINATOR]] == [("Z", "X")]
 
     records_a = DomainRecords(SPECIALISTS)
     pairs_a = build_pairs([r], "a", records_a)
+    # a chose skeptical, which was right: its choice against the wrong options.
+    assert [(p.chosen, p.rejected) for p in pairs_a[COORDINATOR]] == [
+        ("Y", "W"),
+        ("Y", "X"),
+    ]
     (pair_a,) = pairs_a["skeptical"]
     assert (
         "36" in pair_a.rejected
@@ -125,7 +131,7 @@ async def test_code_credit_uses_the_agents_own_probes(add_task):
         if role == "probes":
             return "add(1, 2)\nadd(-3, 3)"
         if role == "coordinator":
-            return "FINAL CHOICE: Y"
+            return "Y"
         return code_reply(
             alt if role == "skeptical" else "def add(a, b):\n    return 0"
         )
@@ -205,7 +211,7 @@ async def test_surprising_pairs_count_twice(math_task):
 async def test_coordinator_learns_when_to_send_the_team_back(math_task):
     def all_wrong_then_one_right(role: str, stage: str, user: str) -> str:
         if role == "coordinator":
-            return "FINAL CHOICE: W"
+            return "W"
         return "\\boxed{36}" if role != "creative" else "\\boxed{30}"
 
     agents = {
@@ -221,8 +227,7 @@ async def test_coordinator_learns_when_to_send_the_team_back(math_task):
         agents, math_task, 1, agents["a"].environment.sandbox, share=True
     )
     pairs = build_pairs([r], "b", DomainRecords(SPECIALISTS))
-    rejections = [p for p in pairs[COORDINATOR] if "FINAL CHOICE: none" in p.chosen]
-    assert rejections and "FINAL CHOICE: W" in rejections[0].rejected
+    assert [(p.chosen, p.rejected) for p in pairs[COORDINATOR]] == [("none", "W")]
 
 
 def test_replay_draws_from_earlier_cycles_only(tmp_path):

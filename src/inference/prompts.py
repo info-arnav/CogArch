@@ -257,19 +257,15 @@ def coordinator_messages(
     options = ", ".join(names)
     if may_reject:
         sections.append(
-            "Choose the one specialist whose position is most likely to be correct. "
-            "Name the specialist by its letter, never the answer itself. If you are "
-            "confident that none of them is correct, you may send the specialists back "
-            "to try again instead, once. Explain briefly, then end with a line of the "
-            "form 'FINAL CHOICE: <name>', where <name> is the specialist's letter, one "
-            f"of: {options}, none."
+            "Reply with only the letter of the specialist whose position is most "
+            f"likely to be correct, one of: {options}. If you are confident that "
+            f"none of them is correct, reply {REJECT_ALL} to send the specialists "
+            "back to try again, once."
         )
     else:
         sections.append(
-            "Choose the one specialist whose position is most likely to be correct. "
-            "Name the specialist by its letter, never the answer itself. Explain "
-            "briefly, then end with a line of the form 'FINAL CHOICE: <name>', where "
-            f"<name> is the specialist's letter, one of: {options}."
+            "Reply with only the letter of the specialist whose position is most "
+            f"likely to be correct, one of: {options}."
         )
     return _messages(
         persona.system_prompt, _with_memory("\n\n".join(sections), memory_text)
@@ -290,51 +286,22 @@ def specialist_labels(names: list[str]) -> dict[str, str]:
     return {name: LABELS[i] for i, name in enumerate(names)}
 
 
-_LETTER_CHOICE = re.compile(
-    r"(?i:final choice|choice|choose|chosen|choosing|select|go with|specialist|position)"
-    r"\W{0,4}([W-Z])\b"
-)
+def choice_options(letters: list[str], may_reject: bool) -> list[str]:
+    """Every reply the coordinator may give: a specialist's letter, or 'none'
+    when it may send the team back."""
+    return [*letters, REJECT_ALL] if may_reject else list(letters)
 
 
-def parse_choice(text: str, names: list[str], may_reject: bool = False) -> str | None:
-    """The named position after 'FINAL CHOICE:' ('none' when rejecting is
-    allowed), else the last position named in the reply's final lines."""
-    found = re.findall(
-        r"FINAL CHOICE\W*[:\-]?\s*\**\s*([A-Za-z]+)", text, re.IGNORECASE
-    )
-    allowed = {n.lower(): n for n in ([*names, REJECT_ALL] if may_reject else names)}
-    for word in reversed(found):
-        if word.lower() in allowed:
-            return allowed[word.lower()]
-    tail = text[-300:]
-    if all(len(n) == 1 for n in names):
-        letters = [m for m in _LETTER_CHOICE.findall(tail) if m in names]
-        return letters[-1] if letters else None
-    lowered = tail.lower()
-    last = max(((lowered.rfind(n.lower()), n) for n in names), default=(-1, None))
-    return last[1] if last[0] >= 0 else None
-
-
-def coordinator_rejection() -> str:
-    """A well-formed decision to send the specialists back to try again."""
-    return (
-        "None of these positions holds up against the checked results.\n\n"
-        f"FINAL CHOICE: {REJECT_ALL}"
-    )
+def parse_choice(text: str, options: list[str]) -> str | None:
+    """The option the reply consists of, or None if it is not exactly one."""
+    reply = text.strip().lower()
+    return next((o for o in options if o.lower() == reply), None)
 
 
 def retry_note() -> str:
     return (
         "Your coordinator rejected every answer your team gave to this problem. "
         "Solve it again from the start, checking each step."
-    )
-
-
-def coordinator_endorsement(label: str) -> str:
-    """A well-formed choice of one specialist's position, by its letter."""
-    return (
-        f"{label}'s reasoning holds up and its answer fits the checked "
-        f"results.\n\nFINAL CHOICE: {label}"
     )
 
 

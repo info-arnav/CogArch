@@ -24,7 +24,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import random
-import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -37,6 +36,7 @@ from src.inference.client import ChatModel
 from src.inference.prompts import (
     REJECT_ALL,
     Persona,
+    choice_options,
     coordinator_messages,
     discussion_messages,
     parse_choice,
@@ -90,28 +90,6 @@ def _relabel(evidence: Evidence, labels: dict[str, str]) -> Evidence:
             }
             for d in evidence.differences
         ],
-    )
-
-
-def _named_answer(task: Task, reply: str, shown: list[Proposal]) -> str | None:
-    """When the coordinator names an answer instead of a specialist (common on
-    multiple-choice problems), the action it selected: the first position, in
-    the order shown, that gave that answer. Never for code."""
-    if task.kind == "code":
-        return None
-    named = re.findall(
-        r"FINAL (?:CHOICE|ANSWER)\W*[:\-]?\s*\**\s*([^\n*]+)", reply, re.IGNORECASE
-    )
-    if not named:
-        return None
-    answer = extract_answer(task, f"FINAL ANSWER: {named[-1].strip()}")
-    return next(
-        (
-            p.specialist
-            for p in shown
-            if p.answer and answers_match(task, p.answer, answer)
-        ),
-        None,
     )
 
 
@@ -212,6 +190,10 @@ class Agent:
         self.seed = seed
         self.specialists = specialists
         self.coordinator = coordinator
+        self.helper = Role(
+            coordinator.persona.model_copy(update={"name": "helper"}),
+            coordinator.model,
+        )
         self.client = client
         self.environment = environment
         self.memory = memory
@@ -240,6 +222,7 @@ class Agent:
         messages: list[Message],
         *seed_parts: object,
         trace: dict[str, Any] | None = None,
+        choices: list[str] | None = None,
     ) -> LLMCall:
         seed = derive_seed(self.seed, role.name, stage, *seed_parts)
         call_id = None
@@ -271,6 +254,7 @@ class Agent:
                 max_tokens=self.max_tokens,
                 seed=seed,
                 on_delta=on_delta,
+                choices=choices,
             )
         if call_id is not None:
             self.events.emit(
@@ -532,6 +516,7 @@ class Agent:
             p.model_copy(update={"specialist": labels[p.specialist]}) for p in shown
         ]
         lettered_evidence = _relabel(evidence, labels)
+        options = choice_options(sorted(p.specialist for p in lettered), may_reject)
         if self.selector == "majority":
             largest = max(len(g) for g in evidence.groups)
             leaders = [g for g in evidence.groups if len(g) == largest]
@@ -553,6 +538,7 @@ class Agent:
             ),
             *key,
             trace=step,
+            choices=options,
         )
         training_prompt = coordinator_messages(
             self.coordinator.persona,
@@ -563,14 +549,8 @@ class Agent:
             previous,
             may_reject,
         )
-        letter = parse_choice(
-            call.response, [p.specialist for p in lettered], may_reject
-        )
-        named = by_label.get(letter, letter) if letter is not None else None
-        if named is None:
-            named = _named_answer(task, call.response, shown)
-            if named is not None:
-                return Choice(named, "coordinator_answer", names, call, training_prompt)
+        letter = parse_choice(call.response, options)
+        if letter is None:
             return Choice(
                 _fallback_choice(shown, evidence),
                 "fallback",
@@ -578,7 +558,9 @@ class Agent:
                 call,
                 training_prompt,
             )
-        return Choice(named, "coordinator", names, call, training_prompt)
+        return Choice(
+            by_label.get(letter, letter), "coordinator", names, call, training_prompt
+        )
 
     def _emit_round(
         self,
@@ -705,7 +687,7 @@ class Agent:
     async def write_probes(self, task: Task) -> tuple[list[str], LLMCall]:
         """Example calls the agent invents to compare code solutions' behaviour."""
         call = await self._call(
-            self.coordinator,
+            self.helper,
             "probes",
             probe_messages(task, self.probes_per_problem),
             task.task_id,
@@ -734,6 +716,6 @@ class Agent:
         """Sleep: compare wrong answers with correct ones and say, for each case,
         what went wrong."""
         call = await self._call(
-            self.coordinator, "reflect", reflection_messages(cases), cycle
+            self.helper, "reflect", reflection_messages(cases), cycle
         )
         return parse_reflection(call.response), call
