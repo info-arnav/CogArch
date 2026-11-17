@@ -4,6 +4,7 @@
 # GRADER_URL set (a separate grader pod) every GPU runs experiments; otherwise
 # GPU 0 holds the grader and runs only the baselines.
 set -euo pipefail
+ulimit -n 65536
 cd "$(dirname "$0")/../.."
 export HF_HOME=/workspace/hf OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 OPENBLAS_NUM_THREADS=8 RAYON_NUM_THREADS=8 TOKENIZERS_PARALLELISM=false
 LOGS=/workspace/logs; mkdir -p "$LOGS"

@@ -2,6 +2,7 @@
 # The untrained team, and published methods on the same model, on GPU 0's
 # server, graded like the trained teams.
 set -euo pipefail
+ulimit -n 65536
 cd "$(dirname "$0")/../.."
 export HF_HOME=/workspace/hf OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 OPENBLAS_NUM_THREADS=8 RAYON_NUM_THREADS=8 TOKENIZERS_PARALLELISM=false
 LOGS=/workspace/logs; mkdir -p "$LOGS"
