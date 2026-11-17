@@ -193,3 +193,12 @@ retrieval of similar trajectories).
   logged choices.
 - The plain model is scored on the same benchmark subsets as every other
   system.
+
+### Run speed, before the full runs (17 November 2026)
+
+- Each team works on 20 practice problems at a time instead of 4. Learning still
+  happens only at night; the one difference is that a problem cannot recall
+  another problem from the same group of 20, solved moments earlier.
+- Training no longer recomputes activations to save memory (gradient
+  checkpointing), which made it about a third slower; the result of training is
+  unchanged. The quick check confirms two training jobs still fit on one GPU.

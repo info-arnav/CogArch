@@ -38,6 +38,7 @@ data:
   split_seed: 0
 
 training:
+  gradient_checkpointing: true
   enabled: true
   lora_rank: 16
   lora_alpha: 32

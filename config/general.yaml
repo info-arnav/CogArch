@@ -71,5 +71,5 @@ experiment:
   name: v2-pair
   cycles: 5
   rounds_per_cycle: 100     # 25 per domain
-  round_batch_size: 4
+  round_batch_size: 20
   output_dir: data/runs

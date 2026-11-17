@@ -74,6 +74,7 @@ def make_job(
         batch_size=cfg.batch_size,
         grad_accumulation=cfg.grad_accumulation,
         max_length=cfg.max_length,
+        gradient_checkpointing=cfg.gradient_checkpointing,
     )
 
 

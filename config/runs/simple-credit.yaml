@@ -85,5 +85,5 @@ experiment:
   name: simple-credit
   cycles: 5
   rounds_per_cycle: 100
-  round_batch_size: 4
+  round_batch_size: 20
   output_dir: data/runs

@@ -40,6 +40,7 @@ class DPOJob(BaseModel):
     batch_size: int
     grad_accumulation: int
     max_length: int
+    gradient_checkpointing: bool
 
 
 def run(job: DPOJob) -> None:
@@ -109,7 +110,7 @@ def run(job: DPOJob) -> None:
         loss_weights=[1.0, job.nll_weight] if job.nll_weight > 0 else None,
         max_length=job.max_length,
         bf16=on_gpu,
-        gradient_checkpointing=True,
+        gradient_checkpointing=job.gradient_checkpointing,
         logging_steps=1,
         save_strategy="no",
         report_to="none",

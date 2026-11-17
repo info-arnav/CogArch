@@ -116,6 +116,11 @@ class TrainingConfig(BaseModel):
     batch_size: int = 2
     grad_accumulation: int = 1
     max_length: int = 3072
+    gradient_checkpointing: bool = Field(
+        default=False,
+        description="Recompute activations to save GPU memory, at about a third "
+        "more training time; needed only where memory is tight",
+    )
     min_pairs: int = 4
     winner_take_all: bool = Field(
         default=True, description="Only the best solo winner learns each task"
