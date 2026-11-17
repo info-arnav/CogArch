@@ -117,7 +117,7 @@ class TrainingConfig(BaseModel):
     grad_accumulation: int = 1
     max_length: int = 3072
     gradient_checkpointing: bool = Field(
-        default=False,
+        default=True,
         description="Recompute activations to save GPU memory, at about a third "
         "more training time; needed only where memory is tight",
     )

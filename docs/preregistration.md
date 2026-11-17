@@ -199,6 +199,6 @@ retrieval of similar trajectories).
 - Each team works on 20 practice problems at a time instead of 4. Learning still
   happens only at night; the one difference is that a problem cannot recall
   another problem from the same group of 20, solved moments earlier.
-- Training no longer recomputes activations to save memory (gradient
-  checkpointing), which made it about a third slower; the result of training is
-  unchanged. The quick check confirms two training jobs still fit on one GPU.
+- Training without gradient checkpointing was tried and does not fit: two
+  training jobs beside the model server ran out of memory on a 48 GB GPU in the
+  quick check, so checkpointing stays on.
