@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Every run of the full experiment (docs/preregistration.md), spread over GPUs
-# 1..N-1: each run uses its GPU's model server and trains on that GPU. GPU 0
-# holds the shared grader and runs the baselines (scripts/runpod/baselines.sh).
+# Every run of the full experiment (docs/preregistration.md), spread over the
+# GPUs: each run uses its GPU's model server and trains on that GPU. With
+# GRADER_URL set (a separate grader pod) every GPU runs experiments; otherwise
+# GPU 0 holds the grader and runs only the baselines.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 export HF_HOME=/workspace/hf
 LOGS=/workspace/logs; mkdir -p "$LOGS"
 GPUS=$(nvidia-smi -L | wc -l)
+FIRST=$([ -n "${GRADER_URL:-}" ] && echo 0 || echo 1)
 RUNS=(
   full:1 full:2 full:3
   no-memory:1 no-memory:2 no-memory:3
@@ -18,10 +20,10 @@ RUNS=(
 )
 i=0
 for run in "${RUNS[@]}"; do
-  config=${run%%:*}; replicate=${run##*:}; gpu=$((1 + i % (GPUS - 1)))
+  config=${run%%:*}; replicate=${run##*:}; gpu=$((FIRST + i % (GPUS - FIRST)))
   CUDA_VISIBLE_DEVICES=$gpu \
   INFERENCE_BASE_URL=http://localhost:$((8200 + gpu))/v1 \
-  VERIFIER_URL=http://localhost:8300/v1 \
+  VERIFIER_URL=${GRADER_URL:-http://localhost:8300/v1} \
   TRAINING_SLOTS_DIR=/workspace/slots/gpu$gpu \
     nohup python3 -m cli.main run "config/runs/$config.yaml" --replicate "$replicate" \
     > "$LOGS/$config-r$replicate.log" 2>&1 < /dev/null &

@@ -51,6 +51,7 @@ class InferenceClient:
         base_url: str,
         timeout_seconds: float = 300.0,
         max_concurrent_requests: int = 64,
+        api_key: str | None = None,
     ) -> None:
         # Expire idle connections before the server's 5s keep-alive does, so a
         # request is never written to a socket the server is closing.
@@ -58,6 +59,7 @@ class InferenceClient:
             base_url=base_url.rstrip("/"),
             timeout=timeout_seconds,
             limits=httpx.Limits(keepalive_expiry=2.0),
+            headers={"Authorization": f"Bearer {api_key}"} if api_key else None,
         )
         self._slots = asyncio.Semaphore(max_concurrent_requests)
         self.usage = {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0}

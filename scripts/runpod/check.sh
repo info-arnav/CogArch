@@ -8,7 +8,7 @@ export HF_HOME=/workspace/hf
 LOGS=/workspace/logs; mkdir -p "$LOGS"
 rm -rf data/runs/check-r1
 G=$(( $(nvidia-smi -L | wc -l) - 1 ))
-CUDA_VISIBLE_DEVICES=$G INFERENCE_BASE_URL=http://localhost:$((8200 + G))/v1 VERIFIER_URL=http://localhost:8300/v1 \
+CUDA_VISIBLE_DEVICES=$G INFERENCE_BASE_URL=http://localhost:$((8200 + G))/v1 VERIFIER_URL=${GRADER_URL:-http://localhost:8300/v1} \
 TRAINING_SLOTS_DIR=/workspace/slots/check \
   python3 -m cli.main run config/pilot.yaml > "$LOGS/check.log" 2>&1
 python3 - <<'PY'

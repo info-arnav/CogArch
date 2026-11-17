@@ -17,6 +17,7 @@ which specialists were right, so scores and credit never disagree.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from typing import TYPE_CHECKING
 
@@ -182,6 +183,7 @@ def build_grader(cfg: Config, client: InferenceClient) -> Grader:
             g.verifier_url,
             cfg.inference.request_timeout_seconds,
             cfg.inference.max_concurrent_requests,
+            os.environ.get("VERIFIER_API_KEY"),
         )
         if g.verifier_url
         else None
