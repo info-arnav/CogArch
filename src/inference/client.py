@@ -258,11 +258,13 @@ class InferenceClient:
             raise RuntimeError(f"vLLM refused adapter {name}: {response.text}")
 
     async def unload_adapter(self, name: str) -> None:
+        """An adapter the server does not have (a resumed run's adapters from
+        before a server restart) is already unloaded."""
         response = await self._client.post(
             "/unload_lora_adapter", json={"lora_name": name}
         )
         calllog.record("adapter_unload", name=name, status=response.status_code)
-        if response.is_error:
+        if response.is_error and response.status_code != 404:
             raise RuntimeError(f"vLLM could not unload adapter {name}: {response.text}")
 
     async def aclose(self) -> None:
