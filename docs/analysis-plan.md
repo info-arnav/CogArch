@@ -14,6 +14,11 @@ re-checked on the complete data before it goes in the paper.
 - Runs that stopped and were resumed (host restarts on 17 Nov, one training
   out-of-memory crash, the adapter-unload bug after restarts) listed with what
   was redone; each resumed from its last finished cycle.
+- The grader pod was down from about 04:22 to 04:36 IST on 18 Nov. Every
+  verdict logged in that window must come from a successful grader reply after
+  retry, not from a fallback.
+- Hugging Face refused uploads from one pod's address (429/403); every run's
+  final and complete folders are on the repos before the analysis starts.
 
 ## 2. Main question
 
