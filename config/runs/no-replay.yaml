@@ -52,7 +52,7 @@ training:
   grad_accumulation: 2
   max_length: 3072
   min_pairs: 4
-  global_slots: 2
+  global_slots: 1
   rollback_threshold: 0.1
   replay_ratio: 0.0
 memory:

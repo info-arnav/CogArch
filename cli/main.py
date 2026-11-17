@@ -37,12 +37,20 @@ def run(
     config: str = typer.Argument(..., help="Path to an experiment config"),
     replicate: int = typer.Option(1, min=1, help="Replicate number (changes seeds)"),
     model: str = typer.Option("", help="Override the base model"),
+    resume: bool = typer.Option(
+        False, help="Continue a stopped run after its last finished cycle"
+    ),
 ) -> None:
     """Run an experiment: baseline, cycles of compete → sleep → validate, final eval."""
+    from src import resume as resuming
     from src.experiment import Experiment
 
     cfg = _replicate(_with_model(load_config(config), model or None), replicate)
-    asyncio.run(Experiment(cfg, Console()).run())
+    if resume:
+        prepared = resuming.prepare(cfg.run_dir, cfg.memory.enabled)
+        asyncio.run(Experiment(cfg, Console()).continue_run(prepared))
+    else:
+        asyncio.run(Experiment(cfg, Console()).run())
 
 
 @app.command()

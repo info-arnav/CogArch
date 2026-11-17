@@ -109,6 +109,12 @@ class DomainRecords:
     def snapshot(self) -> dict[str, dict[str, float]]:
         return {s: dict(v) for s, v in self.values.items()}
 
+    def restore(
+        self, values: dict[str, dict[str, float]], win_rate: dict[str, float]
+    ) -> None:
+        self.values = {s: dict(values[s]) for s in self.specialists}
+        self.win_rate = {s: win_rate[s] for s in self.specialists}
+
 
 def _correctness(r: RoundResult, agent: str) -> dict[str, bool]:
     return r.correct.get(agent, {})

@@ -55,6 +55,13 @@ class AdapterRegistry:
         self._history.setdefault(self._key(agent, role), []).append(version)
         self._save()
 
+    def drop_after(self, cycle: int) -> None:
+        """Forget every version trained after `cycle`."""
+        self._history = {
+            k: [v for v in vs if v.cycle <= cycle] for k, vs in self._history.items()
+        }
+        self._save()
+
     def rollback(self, agent: str, role: str, cycle: int) -> AdapterVersion | None:
         """Drop the version trained in `cycle` (if any); return the new current one."""
         versions = self._history.get(self._key(agent, role), [])

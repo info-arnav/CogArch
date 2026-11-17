@@ -17,7 +17,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from src import calllog
+from src import calllog, resume
 from src.config import Config
 from src.environment import Environment, extract_answer
 from src.eval import scoring
@@ -725,6 +725,49 @@ class Experiment:
         if self.grader.verifier is not None:
             await self.grader.verifier.wait_ready()
 
+    async def _restore_adapters(self) -> None:
+        for name, agent in self.agents.items():
+            for role in agent.roles:
+                current = self.registry.current(name, role)
+                if current is None:
+                    continue
+                served = f"{self.cfg.experiment.name}-{self.session}-{name}-{role}-c{current.cycle}"
+                await self.client.load_adapter(served, Path(current.path))
+                agent.roles[role].model = served
+
+    async def continue_run(self, prepared: dict) -> ExperimentReport:
+        """Continues a stopped run after its last finished cycle (see
+        src/resume.py, which set aside what came after)."""
+        await self._servers_ready()
+        report = ExperimentReport.model_validate_json(
+            (self.run_dir / "report.json").read_text()
+        )
+        done = len(report.cycles)
+        self._build_agents()
+        for name, state in resume.records(self.run_dir, done).items():
+            self.records[name].restore(state["values"], state["win_rate"])
+        await self._restore_adapters()
+        best_mean = {
+            n: sum(v.values()) / len(v) for n, v in report.baseline_validation.items()
+        }
+        for m in report.cycles:
+            for name, by_domain in m.validation.items():
+                if name not in m.rolled_back:
+                    best_mean[name] = max(
+                        best_mean[name], sum(by_domain.values()) / len(by_domain)
+                    )
+        self.events.emit(
+            "resume",
+            **prepared,
+            models={
+                n: {r: role.model for r, role in a.roles.items()}
+                for n, a in self.agents.items()
+            },
+            global_slots=self.cfg.training.global_slots,
+        )
+        self.console.print(f"[bold]Resuming after cycle {done}[/bold]")
+        return await self._cycles(report, self._curriculum(), best_mean, done + 1)
+
     async def run(self) -> ExperimentReport:
         await self._servers_ready()
         self.run_dir.mkdir(parents=True, exist_ok=True)
@@ -757,8 +800,16 @@ class Experiment:
         report.baseline_validation_specialists_no_persona = start.specialists_no_persona
         best_mean = {n: sum(v.values()) / len(v) for n, v in start.whole.items()}
         self._save(report)
+        return await self._cycles(report, curriculum, best_mean, 1)
 
-        for cycle in range(1, self.cfg.experiment.cycles + 1):
+    async def _cycles(
+        self,
+        report: ExperimentReport,
+        curriculum: Curriculum,
+        best_mean: dict[str, float],
+        first: int,
+    ) -> ExperimentReport:
+        for cycle in range(first, self.cfg.experiment.cycles + 1):
             self.console.print(f"[bold cyan]Cycle {cycle}[/bold cyan]")
             metrics = CycleMetrics(cycle=cycle)
             self._phase("wake", cycle)

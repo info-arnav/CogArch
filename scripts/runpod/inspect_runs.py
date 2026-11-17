@@ -50,7 +50,7 @@ def settings_drift(run: Path) -> list[str]:
         "data",
     ):
         for key, value in expected.get(section, {}).items():
-            if key in ("name", "output_dir", "slots_dir", "seeds"):
+            if key in ("name", "output_dir", "slots_dir", "seeds", "global_slots"):
                 continue
             got = report.get(section, {}).get(key)
             if got != value:

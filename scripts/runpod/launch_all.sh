@@ -28,8 +28,8 @@ for run in "${RUNS[@]}"; do
   INFERENCE_BASE_URL=http://localhost:$((8200 + gpu))/v1 \
   VERIFIER_URL=${GRADER_URL:-http://localhost:8300/v1} \
   TRAINING_SLOTS_DIR=/workspace/slots/gpu$gpu \
-    nohup python3 -m cli.main run "config/runs/$config.yaml" --replicate "$replicate" \
-    > "$LOGS/$config-r$replicate.log" 2>&1 < /dev/null &
+    nohup python3 -m cli.main run "config/runs/$config.yaml" --replicate "$replicate" ${RESUME:+--resume} \
+    >> "$LOGS/$config-r$replicate.log" 2>&1 < /dev/null &
   echo "$config-r$replicate on GPU $gpu"
   i=$((i + 1))
 done
