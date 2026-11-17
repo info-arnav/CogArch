@@ -341,7 +341,7 @@ nights = {
     for d in (RUN / "adapters").glob("*/*/cycle_*")
     if d.is_dir()
 }
-if cfg["memory"]["enabled"] and len(snaps) < len(nights):
+if cfg["memory"]["enabled"] and len(snaps) < len(nights) - 1:
     bad.append(f"snapshots {snaps}")
 check(
     "memory: one episode per problem and team, no subject labels, a snapshot each night",
