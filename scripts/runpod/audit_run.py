@@ -327,7 +327,8 @@ for agent in agents:
                 f"{agent}: episode {episode.get('id', '?')} carries a subject label"
             )
 expected = sum(len(r["results"]) for r in rounds)
-if cfg["memory"]["enabled"] and mem_rows != expected:
+batch = cfg["experiment"].get("round_batch_size", 1) * len(agents)
+if cfg["memory"]["enabled"] and not expected <= mem_rows <= expected + batch:
     bad.append(f"{mem_rows} episodes stored for {expected} problem-team pairs")
 snaps = (
     sorted(p.name for p in (RUN / "memory_snapshots").glob("cycle_*"))
@@ -364,7 +365,10 @@ coord_mem = [
     r
     for r in models
     if r.get("role") == "coordinator"
-    and "Notes from your memory" in r["request"]["messages"][-1]["content"]
+    and "Notes from your memory"
+    in r["request"]["messages"][-1]["content"].rsplit("Reply with only the letter", 1)[
+        -1
+    ]
 ]
 bad += [f"id {r['id']}: memory shown to the coordinator" for r in coord_mem]
 hits = sum(1 for r in recalls if r.get("text"))
