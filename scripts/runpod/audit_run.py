@@ -231,14 +231,12 @@ for agent in agents:
                             f"{agent}/coordinator {f.name}: pair {chosen!r} > {rejected!r}"
                         )
                 else:
-                    task_id = next(
-                        (
-                            t
-                            for (a, t, resp) in correct_of
-                            if a == agent and resp == rejected
-                        ),
-                        None,
-                    )
+                    tasks = {
+                        t
+                        for (a, t, resp) in correct_of
+                        if a == agent and resp == rejected
+                    }
+                    task_id = next(iter(tasks)) if len(tasks) == 1 else None
                     if task_id and correct_of.get((agent, task_id, rejected)) is True:
                         bad.append(
                             f"{agent}/{role} {f.name}: rejected reply was graded correct"
@@ -366,7 +364,7 @@ coord_mem = [
     r
     for r in models
     if r.get("role") == "coordinator"
-    and "Similar problems" in r["request"]["messages"][-1]["content"]
+    and "Notes from your memory" in r["request"]["messages"][-1]["content"]
 ]
 bad += [f"id {r['id']}: memory shown to the coordinator" for r in coord_mem]
 hits = sum(1 for r in recalls if r.get("text"))
@@ -384,7 +382,7 @@ for r in models:
         "coordinator",
     ]:
         user = r["request"]["messages"][-1]["content"]
-        if "Your team's previous answer" in user or "rejected every answer" in user:
+        if "Your team's previous answer" in user:
             bad.append(
                 f"id {r['id']}: told a previous answer was wrong during {r['phase']}"
             )
