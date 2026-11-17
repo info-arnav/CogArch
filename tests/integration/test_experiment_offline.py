@@ -9,13 +9,15 @@ from __future__ import annotations
 import json
 
 import pytest
+from fastapi.testclient import TestClient
 
 import src.experiment as experiment_module
 import src.tasks as tasks_module
+from src import calllog
 from src.analysis import analyze
 from src.config import load_config
-from src.dashboard import RunStore
 from src.experiment import Experiment
+from src.live.server import build_app
 from src.models.core import Message, Task
 from tests.conftest import role_of
 
@@ -48,6 +50,7 @@ class FakeClient:
 
     def __init__(self) -> None:
         self.loaded: list[str] = []
+        self.usage = {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0}
 
     async def chat(
         self,
@@ -56,11 +59,12 @@ class FakeClient:
         temperature: float,
         max_tokens: int,
         seed: int,
+        on_delta=None,  # noqa: ANN001
     ) -> str:
         system, user = messages[0].content, messages[-1].content
         role = role_of(system)
         if role == "reflect":
-            return "ADD: Re-read the question before answering"
+            return "CASE 1: Re-read the question before answering"
         if "multiple-choice" in user:
             good = role in ("empathetic", "coordinator") or seed % 3 == 0
             return "FINAL ANSWER: B" if good else "FINAL ANSWER: A"
@@ -79,6 +83,9 @@ class FakeClient:
         self.loaded.append(name)
 
     async def unload_adapter(self, name) -> None:  # noqa: ANN001
+        return None
+
+    async def wait_ready(self) -> None:
         return None
 
     async def aclose(self) -> None:
@@ -110,6 +117,7 @@ def fake_world(monkeypatch, tmp_path):
         cfg.experiment.name = name
         cfg.training.enabled = False
         cfg.memory.enabled = False
+        cfg.grading.verifier_url = None
         cfg.evaluation.benchmarks = list(benchmarks)
         cfg.evaluation.max_items = 10
         return cfg
@@ -126,14 +134,15 @@ def _experiment(cfg) -> Experiment:  # noqa: ANN001
 async def test_full_pipeline_offline(fake_world):
     config, runs = fake_world
     await _experiment(config("config/general.yaml", "pair-r1")).run()
-    await _experiment(config("config/general_solo.yaml", "solo-r1")).run()
+    await _experiment(config("config/runs/solo.yaml", "solo-r1")).run()
     await _experiment(config("config/general.yaml", "baseline")).baseline()
 
     report = json.loads((runs / "pair-r1" / "report.json").read_text())
     assert len(report["cycles"]) == 2
     c = report["cycles"][0]
     assert set(c["validation"]["a"]) == {"math", "social"}
-    assert set(c["validation_specialists"]["a"]) == {
+    assert c["validation_specialists"] == {}
+    assert set(report["cycles"][-1]["validation_specialists"]["a"]) == {
         "logical",
         "creative",
         "skeptical",
@@ -144,25 +153,38 @@ async def test_full_pipeline_offline(fake_world):
         c["domain_records"]["a"]["logical"]["math"]
         > c["domain_records"]["a"]["creative"]["math"]
     )
-    assert c["lessons"] == {}  # memory disabled
     modes = {e["mode"] for e in report["final_benchmarks"]}
     assert modes == {
         "agent",
         "specialist",
+        "specialist_neutral",
     }  # no adapters trained, so no plain fine-tuned
+    records = list(calllog.read(runs / "pair-r1" / "calls.jsonl.gz"))
+    kinds = {r["kind"] for r in records}
+    assert {"phase", "task", "graded", "validated", "team_decision"} <= kinds
+    graded = [r for r in records if r["kind"] == "graded"]
+    assert {r.get("phase") for r in graded} >= {"validate", "wake", "benchmarks"}
+    wake = [r for r in graded if r.get("phase") == "wake"]
+    assert wake and all(r["task_id"] and r["cycle"] for r in wake)
+    bench = [r for r in records if r["kind"] == "team_decision" and r.get("benchmark")]
+    assert bench and all(
+        set(r["first_correct"]) == {"logical", "creative", "skeptical", "empathetic"}
+        for r in bench
+    )
     rounds = [
         json.loads(line)
         for line in (runs / "pair-r1" / "rounds" / "cycle_1.jsonl").open()
     ]
     assert (
         len(rounds) == 6
-        and len(rounds[0]["results"]["a"]["decisions"][0]["calls"]) == 9
+        and 4 <= len(rounds[0]["results"]["a"]["decisions"][0]["calls"]) <= 5
     )
 
     base = json.loads((runs / "baseline" / "report.json").read_text())
     assert {e["mode"] for e in base["baseline_benchmarks"]} == {
         "agent",
         "specialist",
+        "specialist_neutral",
         "plain",
     }
 
@@ -171,7 +193,35 @@ async def test_full_pipeline_offline(fake_world):
         "Untrained · whole agent" in summary and "| pair | logical | math |" in summary
     )
 
-    store = RunStore(runs)
-    assert {r["kind"] for r in store.runs()} == {"baseline", "run"}
-    assert store.rounds("pair-r1", 1)[0]["domain"] in {"math", "social"}
-    assert store.round("pair-r1", 1, 0)["task"]["task_id"]
+    events = [json.loads(line) for line in (runs / "pair-r1" / "events.jsonl").open()]
+    kinds = [e["type"] for e in events]
+    assert kinds[0] == "run_start" and kinds[-1] == "phase"
+    for kind in [
+        "task",
+        "call_start",
+        "call_end",
+        "round",
+        "decision",
+        "verdict",
+        "known",
+        "credit",
+        "credit_rules",
+        "pairs",
+        "validation_done",
+    ]:
+        assert kind in kinds, kind
+    starts = {e["call"] for e in events if e["type"] == "call_start"}
+    ends = {e["call"] for e in events if e["type"] == "call_end"}
+    assert starts == ends and len(starts) >= 6 * 2 * 9
+
+    web = TestClient(build_app(runs))
+    assert {r["name"] for r in web.get("/api/runs").json()} >= {"pair-r1", "solo-r1"}
+    assert (
+        web.get("/api/memory", params={"run": "pair-r1", "agent": "a"}).json()[
+            "episodes"
+        ]
+        == []
+    )
+    assert (
+        web.get("/api/memory", params={"run": "../x", "agent": "a"}).status_code == 400
+    )

@@ -4,6 +4,9 @@ Three modes, each on the same benchmark tasks:
 
   agent       the whole brain (round 1, discussion, decision), no memory
   specialist  one specialist alone with its own persona (shows specialisation)
+  specialist_neutral
+              the same specialist, same weights and temperature, without its
+              persona sentence (isolates what the persona costs or adds)
   plain       one model with no persona, greedy, using the standard prompt for
               that benchmark (EvalPlus's chat protocol for code) — comparable
               to officially published single-model scores
@@ -18,11 +21,16 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from src import calllog
 from src.environment import answers_match, extract_answer
 from src.inference.client import InferenceClient
 from src.inference.prompts import CODE_INSTRUCTION, task_text
 from src.models.core import Message, Task
+
+if TYPE_CHECKING:
+    from src.grading import Grader
 
 Answerer = Callable[[Task, int], Awaitable[str]]
 
@@ -41,17 +49,19 @@ def pass_at_1(results_path: Path) -> dict[str, float]:
 
 
 async def _score_evalplus(
-    benchmark: str, answers: list[tuple[Task, str]], samples_path: Path
+    benchmark: str,
+    answers: list[tuple[Task, str]],
+    samples_path: Path,
+    grader: Grader,
 ) -> dict[str, float]:
     from evalplus.evaluate import evaluate as evalplus_evaluate
-    from evalplus.sanitize import sanitize
 
     samples_path.parent.mkdir(parents=True, exist_ok=True)
     results = samples_path.with_name(samples_path.stem + "_eval_results.json")
     results.unlink(missing_ok=True)
+    solutions = await asyncio.gather(*(grader.code(t, reply) for t, reply in answers))
     with open(samples_path, "w") as f:
-        for task, code in answers:
-            solution = sanitize(code, task.entry_point)
+        for (task, _), solution in zip(answers, solutions):
             f.write(json.dumps({"task_id": task.task_id, "solution": solution}) + "\n")
     await asyncio.to_thread(
         evalplus_evaluate, dataset=benchmark, samples=str(samples_path)
@@ -59,20 +69,38 @@ async def _score_evalplus(
     return pass_at_1(results)
 
 
-def _score_answers(
-    answers: list[tuple[Task, str]], samples_path: Path
+async def _score_answers(
+    answers: list[tuple[Task, str]], samples_path: Path, grader: Grader
 ) -> dict[str, float]:
+    """Graded by the verifier; the rule-based score is kept beside it, the way
+    lm-eval reports strict and flexible matches."""
     samples_path.parent.mkdir(parents=True, exist_ok=True)
+    verdicts = await asyncio.gather(
+        *(grader.correct(task, reply, task.answer) for task, reply in answers)
+    )
+    hits, rule_hits = [], []
     with open(samples_path, "w") as f:
-        hits = []
-        for task, answer in answers:
-            ok = answers_match(task, task.answer, answer)
+        for (task, reply), ok in zip(answers, verdicts):
+            extracted = extract_answer(task, reply)
+            rule = answers_match(task, task.answer, extracted)
             hits.append(ok)
+            rule_hits.append(rule)
             f.write(
-                json.dumps({"task_id": task.task_id, "answer": answer, "correct": ok})
+                json.dumps(
+                    {
+                        "task_id": task.task_id,
+                        "answer": extracted,
+                        "correct": ok,
+                        "rule_correct": rule,
+                        "reply": reply,
+                    }
+                )
                 + "\n"
             )
-    return {"accuracy": sum(hits) / len(hits)}
+    return {
+        "accuracy": sum(hits) / len(hits),
+        "rule_accuracy": sum(rule_hits) / len(rule_hits),
+    }
 
 
 async def score(
@@ -81,16 +109,22 @@ async def score(
     answerer: Answerer,
     samples: int,
     samples_path: Path,
+    grader: Grader,
 ) -> dict[str, float]:
-    """Pass@1 / accuracy averaged over `samples` answers per task."""
+    """Pass@1 / accuracy averaged over `samples` replies per task."""
     jobs = [(t, i) for t in tasks for i in range(samples)]
-    replies = await asyncio.gather(*(answerer(t, i) for t, i in jobs))
+    replies = await asyncio.gather(
+        *(
+            calllog.within({"task_id": t.task_id, "sample": i}, answerer(t, i))
+            for t, i in jobs
+        )
+    )
     answers = [(t, a) for (t, _), a in zip(jobs, replies)]
     if tasks and tasks[0].kind == "code" and benchmark in {"humaneval", "mbpp"}:
         if len(tasks) < len(_all_evalplus(benchmark)):
             raise ValueError(f"EvalPlus needs every {benchmark} task; got a subset")
-        return await _score_evalplus(benchmark, answers, samples_path)
-    return _score_answers(answers, samples_path)
+        return await _score_evalplus(benchmark, answers, samples_path, grader)
+    return await _score_answers(answers, samples_path, grader)
 
 
 def _all_evalplus(benchmark: str) -> list[Task]:
@@ -120,15 +154,14 @@ def plain_answerer(client: InferenceClient, model: str, max_tokens: int) -> Answ
                 model,
                 max_tokens,
             )
-            return extract_answer(task, f"```python\n{reply}")
-        reply = await client.chat(
+            return f"```python\n{reply}"
+        return await client.chat(
             [Message(role="user", content=task_text(task))],
             model=model,
             temperature=0.0,
             max_tokens=max_tokens,
             seed=sample,
         )
-        return extract_answer(task, reply)
 
     return answer
 
@@ -170,17 +203,24 @@ def majority_answerer(
                 for i in range(samples)
             )
         )
-        answers = [a for a in (extract_answer(task, r) for r in replies) if a]
-        if not answers:
-            return ""
-        groups: list[list[str]] = []
-        for a in answers:
-            for g in groups:
-                if _same(task, g[0], a):
-                    g.append(a)
-                    break
-            else:
-                groups.append([a])
-        return max(groups, key=len)[0]
+        return most_common_reply(task, list(replies))
 
     return answer
+
+
+def most_common_reply(task: Task, replies: list[str]) -> str:
+    """A reply carrying the most common answer (ties go to the earliest);
+    the first reply if none has a readable answer."""
+    answered = [(extract_answer(task, r), r) for r in replies]
+    answered = [(a, r) for a, r in answered if a]
+    if not answered:
+        return replies[0]
+    groups: list[list[tuple[str, str]]] = []
+    for a, r in answered:
+        for g in groups:
+            if _same(task, g[0][0], a):
+                g.append((a, r))
+                break
+        else:
+            groups.append([(a, r)])
+    return max(groups, key=len)[0][1]

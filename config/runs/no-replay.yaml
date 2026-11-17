@@ -1,0 +1,84 @@
+# Full experiment, setting 'no-replay' (see docs/preregistration.md). Generated from config/general.yaml.
+model:
+  base: Qwen/Qwen2.5-1.5B-Instruct
+  served_name: Qwen/Qwen2.5-1.5B-Instruct
+  max_tokens: 2048
+inference:
+  base_url: http://localhost:8000/v1
+  max_concurrent_requests: 512
+grading:
+  verifier_url: http://localhost:8011/v1
+  verifier_model: IAAR-Shanghai/xVerify-3B-Ia
+  extract_code_with_model: true
+agents:
+  names:
+  - a
+  - b
+  seeds:
+    a: 11
+    b: 22
+  specialists:
+  - logical
+  - creative
+  - skeptical
+  - empathetic
+  share_discoveries: true
+  discussion: never
+  selector: coordinator
+  personas: full
+environment:
+  max_attempts: 3
+  feedback: binary
+  execution_timeout_seconds: 10
+  memory_limit_mb: 1024
+  probes_per_problem: 6
+data:
+  domains:
+  - code
+  - math
+  - reasoning
+  - social
+  validation_per_domain: 25
+  split_seed: 0
+training:
+  enabled: true
+  lora_rank: 16
+  lora_alpha: 32
+  learning_rate: 2.0e-05
+  beta: 0.1
+  nll_weight: 1.0
+  epochs: 3
+  batch_size: 2
+  grad_accumulation: 1
+  max_length: 3072
+  min_pairs: 4
+  global_slots: 2
+  rollback_threshold: 0.1
+  replay_ratio: 0.0
+memory:
+  enabled: true
+  embedding_model: BAAI/bge-small-en-v1.5
+  max_episodic: 2000
+  retrieve_k: 3
+evaluation:
+  benchmarks:
+  - humaneval
+  - mbpp
+  - gsm8k
+  - math500
+  - arc_challenge
+  - siqa
+  - emobench_eu
+  - emobench_ea
+  max_items: 300
+  subset_seed: 0
+  samples: 1
+  validation_samples: 2
+  specialists: false
+  plain: false
+experiment:
+  name: no-replay
+  cycles: 5
+  rounds_per_cycle: 100
+  round_batch_size: 4
+  output_dir: data/runs

@@ -29,15 +29,28 @@ v ← v + α (outcome − v).
 
 The coordinator learns separately: deciding for a position that was right is
 preferred over deciding for one that was wrong.
+
+Anchors keep every specialist practised in every domain: a specialist whose own
+first answer was right, on a task it did not learn from, also gets that answer
+preferred over a teammate's wrong one, up to `anchor_ratio` times its main pairs,
+spread evenly over domains. Without them, winner-take-all trains each specialist
+on one domain only and the others fade.
 """
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
+from typing import Any
 
-from src.environment import answers_match
-from src.inference.prompts import coordinator_endorsement
-from src.models.core import Decision, PreferencePair, Proposal, RoundResult, Task
+from src.inference.prompts import coordinator_endorsement, coordinator_rejection
+from src.models.core import (
+    Decision,
+    Message,
+    PreferencePair,
+    Proposal,
+    RoundResult,
+)
 from src.training.community import proposal_key
 
 COORDINATOR = "coordinator"
@@ -100,11 +113,9 @@ def _correctness(r: RoundResult, agent: str) -> dict[str, bool]:
     return r.correct.get(agent, {})
 
 
-def _adopted(task: Task, final: str, proposal: Proposal) -> bool:
-    """Did the coordinator's final answer come from this specialist's position?"""
-    if task.kind == "code":
-        return " ".join(final.split()) == " ".join(proposal.answer.split())
-    return answers_match(task, final, proposal.answer)
+def _adopted(decision: Decision, proposal: Proposal) -> bool:
+    """Was this specialist's final position the one submitted?"""
+    return proposal.round == 2 and decision.chosen == proposal.specialist
 
 
 def build_pairs(
@@ -114,11 +125,16 @@ def build_pairs(
     winner_take_all: bool = True,
     blame_adopted: bool = True,
     surprise_threshold: float | None = 0.5,
+    anchor_ratio: float = 0.0,
+    owner_learns: bool = True,
+    log: list[dict[str, Any]] | None = None,
 ) -> dict[str, list[PreferencePair]]:
-    """Preference pairs per role for one agent; updates its competition state."""
+    """Preference pairs per role for one agent; updates its competition state.
+    With `log`, appends what each rule decided on each task."""
     pairs: dict[str, list[PreferencePair]] = {
         role: [] for role in [*records.specialists, COORDINATOR]
     }
+    anchors: dict[str, list[PreferencePair]] = {s: [] for s in records.specialists}
     for r in rounds:
         known = r.known.get(agent)
         correct = _correctness(r, agent)
@@ -147,8 +163,10 @@ def build_pairs(
                 if winner_take_all
                 else solved_alone
             )
-        else:
+        elif owner_learns:
             learners = [records.owner(domain)]
+        else:
+            learners = []
         roles = {s: ("winner" if s in solved_alone else "owner") for s in learners}
 
         # 4. Attention tags: specialists whose position the coordinator adopted
@@ -158,7 +176,7 @@ def build_pairs(
                 if d.result.passed:
                     continue
                 for p in d.round2:
-                    if p.specialist not in roles and _adopted(r.task, d.answer, p):
+                    if p.specialist not in roles and _adopted(d, p):
                         roles[p.specialist] = "blamed"
 
         for s in records.specialists:
@@ -177,7 +195,7 @@ def build_pairs(
                     for d in decisions
                     if not d.result.passed
                     for p in d.round2
-                    if p.specialist == s and _adopted(r.task, d.answer, p)
+                    if p.specialist == s and _adopted(d, p)
                 ),
                 None,
             )
@@ -187,17 +205,17 @@ def build_pairs(
             rejected = own_wrong or own_adopted_wrong or mate_wrong
             if rejected is None:
                 continue
-            chosen = own_right.response if own_right else known.response
             pair = PreferencePair(
                 task_id=r.task.task_id,
                 domain=domain,
                 agent=agent,
                 role=s,
                 prompt=decisions[0].specialist_prompts[s],
-                chosen=chosen,
+                chosen=own_right.response if own_right else known.response,
                 rejected=rejected.response,
                 source=source,
                 responsibility=responsibility,
+                chosen_from="own" if own_right else "known",
             )
             outcome = 1.0 if responsibility == "winner" else 0.0
             surprising = (
@@ -205,16 +223,86 @@ def build_pairs(
                 and abs(outcome - expected[s]) > surprise_threshold
             )
             pairs[s].extend([pair, pair] if surprising else [pair])
+            if log is not None:
+                log.append(
+                    {
+                        "task_id": r.task.task_id,
+                        "domain": domain,
+                        "specialist": s,
+                        "responsibility": responsibility,
+                        "surprising": surprising,
+                        "record": round(expected[s], 3),
+                        "solved_alone": solved_alone,
+                        "chosen_from": pair.chosen_from,
+                    }
+                )
+
+        if anchor_ratio > 0:
+            mate_wrong_any = next((p for _, p, v in judged if v is False), None)
+            for s in records.specialists:
+                if s in roles or mate_wrong_any is None:
+                    continue
+                own_right = next(
+                    (p for _, p, v in judged if p.specialist == s and v), None
+                )
+                mate = next(
+                    (p for _, p, v in judged if p.specialist != s and v is False), None
+                )
+                if own_right is not None and mate is not None:
+                    anchors[s].append(
+                        PreferencePair(
+                            task_id=r.task.task_id,
+                            domain=domain,
+                            agent=agent,
+                            role=s,
+                            prompt=decisions[0].specialist_prompts[s],
+                            chosen=own_right.response,
+                            rejected=mate.response,
+                            source=source,
+                            responsibility="anchor",
+                            chosen_from="anchor",
+                        )
+                    )
 
         for d in decisions:
+            if not d.coordinator_prompt:
+                continue
+            for prompt, chosen_text, rejected_text in _rejection_pairs(d, verdict):
+                pairs[COORDINATOR].append(
+                    PreferencePair(
+                        task_id=r.task.task_id,
+                        domain=domain,
+                        agent=agent,
+                        role=COORDINATOR,
+                        prompt=prompt,
+                        chosen=chosen_text,
+                        rejected=rejected_text,
+                        source=source,
+                    )
+                )
             good = [p for p in d.round2 if verdict(d, p)]
             bad = [p for p in d.round2 if verdict(d, p) is False]
-            if d.result.passed:
+            chose_right = d.chosen in {p.specialist for p in good}
+            decided = d.chosen_by in ("coordinator", "coordinator_answer")
+            own = (
+                d.coordinator_output
+                if d.chosen_by == "coordinator"
+                else coordinator_endorsement(d.labels[d.chosen])
+            )
+            if decided and chose_right:
                 options = [
-                    (d.coordinator_output, coordinator_endorsement(p)) for p in bad
+                    (own, coordinator_endorsement(d.labels[p.specialist])) for p in bad
                 ]
-            elif good:
-                options = [(coordinator_endorsement(good[0]), d.coordinator_output)]
+            elif not good and bad and d.could_reject and decided:
+                options = [(coordinator_rejection(), d.coordinator_output)]
+            elif good and not chose_right:
+                options = [
+                    (
+                        coordinator_endorsement(d.labels[good[0].specialist]),
+                        d.coordinator_output
+                        or coordinator_endorsement(d.labels[d.chosen]),
+                    )
+                ]
             else:
                 options = []
             for chosen_text, rejected_text in options[
@@ -232,7 +320,49 @@ def build_pairs(
                         source=source,
                     )
                 )
+    for s, extra in anchors.items():
+        pairs[s].extend(_spread(extra, math.ceil(anchor_ratio * len(pairs[s]))))
     return pairs
+
+
+def _rejection_pairs(d: Decision, verdict: Any) -> list[tuple[list[Message], str, str]]:
+    """When the coordinator sent the team back: right to do so if no first
+    answer was correct, wrong if one was."""
+    if not d.rejected_all or not d.first_choice_output:
+        return []
+    good = [p for p in d.round1 if verdict(d, p)]
+    bad = [p for p in d.round1 if verdict(d, p) is False]
+    if good:
+        return [
+            (
+                d.first_choice_prompt,
+                coordinator_endorsement(d.labels[good[0].specialist]),
+                d.first_choice_output,
+            )
+        ]
+    if bad:
+        return [
+            (
+                d.first_choice_prompt,
+                d.first_choice_output,
+                coordinator_endorsement(d.labels[bad[0].specialist]),
+            )
+        ]
+    return []
+
+
+def _spread(pairs: list[PreferencePair], limit: int) -> list[PreferencePair]:
+    """Up to `limit` pairs, taken from each domain in turn."""
+    by_domain: dict[str, list[PreferencePair]] = defaultdict(list)
+    for pair in pairs:
+        by_domain[pair.domain].append(pair)
+    chosen: list[PreferencePair] = []
+    queues = list(by_domain.values())
+    while len(chosen) < limit and any(queues):
+        for queue in queues:
+            if queue and len(chosen) < limit:
+                chosen.append(queue.pop(0))
+    return chosen
 
 
 def specialist_accuracy(
@@ -250,19 +380,27 @@ def specialist_accuracy(
 
 
 def discussion_stats(rounds: list[RoundResult], agent: str) -> tuple[float, float]:
-    """(share of specialist answers changed by the discussion,
-    share of changed answers with known truth that went wrong → right)."""
+    """Over discussed attempts: (share of specialist answers changed by the
+    discussion, share of changed answers with known truth that went wrong →
+    right). Code counts as changed when its judged correctness changed, since
+    rewritten code often behaves the same."""
     changed = total = fixed = judged = 0
     for r in rounds:
         correct = _correctness(r, agent)
         for d in r.results[agent].decisions:
+            if not d.discussed:
+                continue
             for p1, p2 in zip(d.round1, d.round2):
                 total += 1
-                if p1.answer.strip() == p2.answer.strip():
-                    continue
-                changed += 1
                 before = correct.get(proposal_key(d.attempt_number, 1, p1.specialist))
                 after = correct.get(proposal_key(d.attempt_number, 2, p2.specialist))
+                if r.task.kind == "code":
+                    moved = before is not None and after is not None and before != after
+                else:
+                    moved = p1.answer.strip() != p2.answer.strip()
+                if not moved:
+                    continue
+                changed += 1
                 if before is not None and after is not None:
                     judged += 1
                     fixed += int(not before and after)

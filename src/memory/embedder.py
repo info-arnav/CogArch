@@ -16,7 +16,7 @@ class SentenceTransformerEmbedder:
     def __init__(self, model_name: str) -> None:
         from sentence_transformers import SentenceTransformer
 
-        self._model = SentenceTransformer(model_name)
+        self._model = SentenceTransformer(model_name, device="cpu")
 
     def embed(self, text: str) -> list[float]:
         vector = self._model.encode(text, normalize_embeddings=True)

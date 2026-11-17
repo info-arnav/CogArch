@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 import fcntl
 import json
+import random
+import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -16,8 +19,11 @@ from src.training.dpo_job import DPOJob
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-def write_dataset(pairs: list[PreferencePair], path: Path) -> None:
-    """TRL conversational preference format."""
+def write_dataset(
+    pairs: list[PreferencePair], path: Path, replayed: list[str] | None = None
+) -> None:
+    """TRL conversational preference format; `replayed` rows (already in that
+    format) are appended."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         for pair in pairs:
@@ -27,6 +33,21 @@ def write_dataset(pairs: list[PreferencePair], path: Path) -> None:
                 "rejected": [{"role": "assistant", "content": pair.rejected}],
             }
             f.write(json.dumps(row) + "\n")
+        for line in replayed or []:
+            f.write(line + "\n")
+
+
+def replay_rows(folder: Path, cycle: int, count: int, seed: int) -> list[str]:
+    """Sleep replay: up to `count` pairs drawn evenly from earlier cycles' new
+    pairs, so old learning is rehearsed alongside new."""
+    earlier = [
+        folder / f"cycle_{c}_new.jsonl"
+        for c in range(1, cycle)
+        if (folder / f"cycle_{c}_new.jsonl").exists()
+    ]
+    pool = [line for path in earlier for line in path.read_text().splitlines() if line]
+    random.Random(seed).shuffle(pool)
+    return pool[:count]
 
 
 def make_job(
@@ -91,7 +112,36 @@ class TrainingSlot:
         self._handle.close()
 
 
-async def run_jobs(jobs: dict[str, DPOJob], slots_dir: Path, slots: int) -> None:
+OnProgress = Callable[[str, dict[str, Any]], None]
+PROGRESS_POLL_SECONDS = 2.0
+
+
+async def _follow(
+    key: str, path: Path, on_progress: OnProgress, finished: asyncio.Event
+) -> None:
+    """Pass on each line a job appends to its progress file, until it finishes."""
+    seen = 0
+    while True:
+        done = finished.is_set()
+        if path.exists():
+            lines = path.read_text().splitlines()
+            for line in lines[seen:]:
+                on_progress(key, json.loads(line))
+            seen = len(lines)
+        if done:
+            return
+        try:
+            await asyncio.wait_for(finished.wait(), PROGRESS_POLL_SECONDS)
+        except asyncio.TimeoutError:
+            pass
+
+
+async def run_jobs(
+    jobs: dict[str, DPOJob],
+    slots_dir: Path,
+    slots: int,
+    on_progress: OnProgress | None = None,
+) -> None:
     """Run each job in its own process, within the machine-wide slot limit."""
 
     async def run_one(key: str, job: DPOJob) -> None:
@@ -99,18 +149,34 @@ async def run_jobs(jobs: dict[str, DPOJob], slots_dir: Path, slots: int) -> None
         out.mkdir(parents=True, exist_ok=True)
         job_file = out / "job.json"
         job_file.write_text(job.model_dump_json(indent=2))
+        (out / "progress.jsonl").unlink(missing_ok=True)
+        finished = asyncio.Event()
+        follower = (
+            asyncio.create_task(
+                _follow(key, out / "progress.jsonl", on_progress, finished)
+            )
+            if on_progress is not None
+            else None
+        )
+        try:
+            await _train(key, job, out)
+        finally:
+            finished.set()
+            if follower is not None:
+                await follower
+
+    async def _train(key: str, job: DPOJob, out: Path) -> None:
+        job_file = out / "job.json"
         async with TrainingSlot(slots_dir, slots):
             with open(out / "train.log", "w") as log:
-                proc = await asyncio.create_subprocess_exec(
-                    sys.executable,
-                    "-m",
-                    "src.training.dpo_job",
-                    str(job_file),
+                done = await asyncio.to_thread(
+                    subprocess.run,
+                    [sys.executable, "-m", "src.training.dpo_job", str(job_file)],
                     cwd=PROJECT_ROOT,
                     stdout=log,
-                    stderr=asyncio.subprocess.STDOUT,
+                    stderr=subprocess.STDOUT,
                 )
-                code = await proc.wait()
+                code = done.returncode
         if code != 0:
             raise TrainingError(
                 f"DPO job {key} failed (exit {code}); see {out / 'train.log'}"

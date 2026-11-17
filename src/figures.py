@@ -359,10 +359,13 @@ def fig_specialist_benchmarks(
     }
     if not base:
         return None
+    from src.paper import BENCH_LABELS
+
     benches = list(next(iter(base.values()))["scores"])
-    fig, axes = plt.subplots(len(groups), 1, figsize=(FULL_WIDTH, 2.2 * len(groups)))
-    axes = axes if len(groups) > 1 else [axes]
-    for ax, (condition, runs) in zip(axes, groups.items()):
+    titles = {"solo": "One agent alone", "pair": "Two agents together"}
+    order = [c for c in ("solo", "pair") if c in groups]
+    grids = []
+    for condition in order:
         grid = []
         for s in SPECIALISTS:
             row = []
@@ -370,24 +373,39 @@ def fig_specialist_benchmarks(
                 metric = _metric(base[s]["scores"][b])
                 vals = [
                     e["scores"][b][metric] - base[s]["scores"][b][metric]
-                    for r in runs
+                    for r in groups[condition]
                     for e in r["final_benchmarks"]
                     if e["mode"] == "specialist" and e["system"].endswith("/" + s)
                 ]
                 row.append(100 * statistics.mean(vals) if vals else 0.0)
             grid.append(row)
-        bound = max(5.0, max(abs(v) for row in grid for v in row))
-        im = ax.imshow(grid, cmap=_diverging(), vmin=-bound, vmax=bound)
+        grids.append(grid)
+    bound = max(5.0, max(abs(v) for g in grids for row in g for v in row))
+    fig, axes = plt.subplots(
+        1, len(order), figsize=(FULL_WIDTH, 2.25), sharey=True, squeeze=False
+    )
+    for ax, condition, grid in zip(axes[0], order, grids):
+        im = ax.imshow(grid, cmap=_diverging(), vmin=-bound, vmax=bound, aspect="auto")
         for i in range(len(SPECIALISTS)):
             for j in range(len(benches)):
                 ax.text(
-                    j, i, f"{grid[i][j]:+.0f}", ha="center", va="center", fontsize=6.5
+                    j, i, f"{grid[i][j]:+.0f}", ha="center", va="center", fontsize=6.3
                 )
-        ax.set_xticks(range(len(benches)), benches, rotation=35, ha="right")
-        ax.set_yticks(range(len(SPECIALISTS)), SPECIALISTS)
-        ax.set_title(condition)
-        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    fig.tight_layout()
+        ax.set_xticks(
+            range(len(benches)),
+            [BENCH_LABELS.get(b, b) for b in benches],
+            rotation=40,
+            ha="right",
+        )
+        ax.set_yticks(range(len(SPECIALISTS)), [s.capitalize() for s in SPECIALISTS])
+        ax.set_title(titles.get(condition, condition))
+        ax.grid(False)
+        ax.tick_params(length=0)
+        for side in ("left", "bottom"):
+            ax.spines[side].set_visible(False)
+    cbar = fig.colorbar(im, ax=list(axes[0]), fraction=0.025, pad=0.02)
+    cbar.set_label("Change (points)")
+    cbar.outline.set_visible(False)
     return _save(fig, out, "specialist_benchmarks")
 
 

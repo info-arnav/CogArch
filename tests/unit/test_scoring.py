@@ -16,6 +16,7 @@ class FakeClient:
         temperature: float,
         max_tokens: int,
         seed: int,
+        on_delta=None,  # noqa: ANN001
     ) -> str:
         reply = self.replies[self.calls % len(self.replies)]
         self.calls += 1
@@ -27,12 +28,12 @@ async def test_majority_groups_equivalent_math_answers(math_task):
         ["\\boxed{41}", "\\boxed{42}", "\\boxed{42.0}", "\\boxed{41}", "\\boxed{42}"]
     )
     answer = majority_answerer(client, "m", 64, samples=5)  # type: ignore[arg-type]
-    assert await answer(math_task, 0) == "42"
+    assert await answer(math_task, 0) == "\\boxed{42}"
     assert client.calls == 5
 
 
 async def test_majority_choice_and_empty(choice_task):
     client = FakeClient(["FINAL ANSWER: A", "FINAL ANSWER: B", "FINAL ANSWER: B"])
-    assert await majority_answerer(client, "m", 64, samples=3)(choice_task, 0) == "B"  # type: ignore[arg-type]
+    assert await majority_answerer(client, "m", 64, samples=3)(choice_task, 0) == "FINAL ANSWER: B"  # type: ignore[arg-type]
     silent = FakeClient(["no idea"])
-    assert await majority_answerer(silent, "m", 64, samples=3)(choice_task, 0) == ""  # type: ignore[arg-type]
+    assert await majority_answerer(silent, "m", 64, samples=3)(choice_task, 0) == "no idea"  # type: ignore[arg-type]

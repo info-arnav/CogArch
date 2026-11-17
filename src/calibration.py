@@ -19,6 +19,7 @@ from rich.console import Console
 from src.config import Config
 from src.environment import Environment
 from src.execution.sandbox import Sandbox
+from src.grading import build_grader
 from src.inference.agent import Agent, Role
 from src.inference.client import InferenceClient
 from src.inference.prompts import load_coordinator, load_specialist
@@ -43,7 +44,9 @@ async def calibrate(cfg: Config, per_domain: int, console: Console) -> Path:
         specialists={n: Role(load_specialist(n), base) for n in cfg.agents.specialists},
         coordinator=Role(load_coordinator(), base),
         client=client,
-        environment=Environment(sandbox, cfg.environment.feedback),
+        environment=Environment(
+            sandbox, cfg.environment.feedback, build_grader(cfg, client)
+        ),
         memory=None,
         max_attempts=cfg.environment.max_attempts,
         max_tokens=cfg.model.max_tokens,

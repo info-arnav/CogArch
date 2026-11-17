@@ -8,6 +8,10 @@ the preference dataset, hyperparameters and the output directory.
 Reference policy: when continuing an adapter, TRL keeps a frozen copy of the
 starting adapter as the reference, so each cycle's DPO is anchored to the
 previous cycle's policy. On the first cycle the reference is the base model.
+
+Progress is appended to <output_dir>/progress.jsonl as training logs, so the
+experiment can show it live. On a GPU training runs in bfloat16; elsewhere
+(Apple MPS, CPU) in float32.
 """
 
 from __future__ import annotations
@@ -42,9 +46,33 @@ def run(job: DPOJob) -> None:
     import torch
     from datasets import load_dataset
     from peft import LoraConfig, PeftModel
-    from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
+    from transformers import (
+        AutoModelForCausalLM,
+        AutoTokenizer,
+        TrainerCallback,
+        set_seed,
+    )
     from trl import DPOConfig, DPOTrainer
 
+    progress = Path(job.output_dir, "progress.jsonl")
+
+    class Progress(TrainerCallback):  # type: ignore[misc]
+        def on_log(
+            self, args: Any, state: Any, control: Any, logs: Any = None, **kw: Any
+        ) -> None:
+            with open(progress, "a") as f:
+                f.write(
+                    json.dumps(
+                        {
+                            "step": state.global_step,
+                            "of": state.max_steps,
+                            **(logs or {}),
+                        }
+                    )
+                    + "\n"
+                )
+
+    on_gpu = torch.cuda.is_available()
     set_seed(job.seed)
     tokenizer = AutoTokenizer.from_pretrained(job.base_model)
     tokenizer.padding_side = "left"
@@ -52,7 +80,7 @@ def run(job: DPOJob) -> None:
         tokenizer.pad_token = tokenizer.eos_token
 
     model: Any = AutoModelForCausalLM.from_pretrained(
-        job.base_model, dtype=torch.bfloat16
+        job.base_model, dtype=torch.bfloat16 if on_gpu else torch.float32
     )
     peft_config = None
     if job.init_adapter is not None:
@@ -80,9 +108,9 @@ def run(job: DPOJob) -> None:
         loss_type=["sigmoid", "sft"] if job.nll_weight > 0 else ["sigmoid"],
         loss_weights=[1.0, job.nll_weight] if job.nll_weight > 0 else None,
         max_length=job.max_length,
-        bf16=True,
+        bf16=on_gpu,
         gradient_checkpointing=True,
-        logging_steps=5,
+        logging_steps=1,
         save_strategy="no",
         report_to="none",
     )
@@ -92,6 +120,7 @@ def run(job: DPOJob) -> None:
         train_dataset=dataset,
         processing_class=tokenizer,
         peft_config=peft_config,
+        callbacks=[Progress()],
     )
     trainer.train()
     trainer.model.save_pretrained(job.output_dir, selected_adapters=["default"])

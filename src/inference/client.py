@@ -1,21 +1,35 @@
-"""Client for an OpenAI-compatible vLLM server with runtime LoRA loading.
+"""Client for an OpenAI-compatible server with runtime LoRA loading.
 
-The server runs with `--enable-lora` and VLLM_ALLOW_RUNTIME_LORA_UPDATING=True
-(see scripts/serve_vllm.sh). Every fine-tuned adapter is served under its own
-name, so each specialist and coordinator runs its own weights on one base model.
+On the GPU server this is vLLM with `--enable-lora` and
+VLLM_ALLOW_RUNTIME_LORA_UPDATING=True (see scripts/serve_vllm.sh); on a laptop
+it is src/inference/local_server.py. Every fine-tuned adapter is served under
+its own name, so each specialist and coordinator runs its own weights on one
+base model. With `on_delta`, the reply is streamed and passed on as it grows.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
+import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 import httpx
 
+from src import calllog
 from src.models.core import Message
 
-TRANSPORT_RETRIES = 5
+SERVER_WAIT_SECONDS = 900.0
+MAX_BACKOFF_SECONDS = 10.0
+
+
+def _backoff(attempt: int) -> float:
+    return float(min(MAX_BACKOFF_SECONDS, 0.5 * 2**attempt))
+
+
+OnDelta = Callable[[str], None]
 
 
 class ChatModel(Protocol):
@@ -26,6 +40,7 @@ class ChatModel(Protocol):
         temperature: float,
         max_tokens: int,
         seed: int,
+        on_delta: OnDelta | None = None,
     ) -> str: ...
 
 
@@ -44,6 +59,39 @@ class InferenceClient:
             limits=httpx.Limits(keepalive_expiry=2.0),
         )
         self._slots = asyncio.Semaphore(max_concurrent_requests)
+        self.usage = {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0}
+
+    def _count(self, usage: dict | None) -> dict | None:
+        self.usage["calls"] += 1
+        for k in ("prompt_tokens", "completion_tokens"):
+            self.usage[k] += int((usage or {}).get(k) or 0)
+        return usage
+
+    async def _logged(
+        self, payload: dict[str, Any], call: Awaitable[tuple[str, dict | None]]
+    ) -> str:
+        """Run a request and add it, input and output, to the run's call log."""
+        start = time.perf_counter()
+        try:
+            text, usage = await call
+        except BaseException as error:
+            calllog.record(
+                "model",
+                server=str(self._client.base_url),
+                request=payload,
+                error=repr(error),
+                seconds=round(time.perf_counter() - start, 3),
+            )
+            raise
+        calllog.record(
+            "model",
+            server=str(self._client.base_url),
+            request=payload,
+            output=text,
+            usage=usage,
+            seconds=round(time.perf_counter() - start, 3),
+        )
+        return text
 
     async def chat(
         self,
@@ -52,6 +100,7 @@ class InferenceClient:
         temperature: float,
         max_tokens: int,
         seed: int,
+        on_delta: OnDelta | None = None,
     ) -> str:
         payload = {
             "model": model,
@@ -60,10 +109,64 @@ class InferenceClient:
             "max_tokens": max_tokens,
             "seed": seed,
         }
+        return await self._logged(payload, self._chat(payload, on_delta))
+
+    async def _chat(
+        self, payload: dict, on_delta: OnDelta | None
+    ) -> tuple[str, dict | None]:
         async with self._slots:
+            if on_delta is not None:
+                return await self._stream(payload, on_delta)
             response = await self._post_with_retry("/chat/completions", payload)
+        return self._reply(response)
+
+    def _reply(self, response: httpx.Response) -> tuple[str, dict | None]:
         response.raise_for_status()
-        return str(response.json()["choices"][0]["message"]["content"] or "")
+        body = response.json()
+        usage = self._count(body.get("usage"))
+        return str(body["choices"][0]["message"]["content"] or ""), usage
+
+    async def _stream(
+        self, payload: dict, on_delta: OnDelta
+    ) -> tuple[str, dict | None]:
+        """The reply as server-sent events. A dropped connection before the
+        first token is retried; after it, the request fails."""
+        waited, attempt = 0.0, 0
+        while True:
+            parts: list[str] = []
+            try:
+                usage: dict | None = None
+                async with self._client.stream(
+                    "POST",
+                    "/chat/completions",
+                    json={
+                        **payload,
+                        "stream": True,
+                        "stream_options": {"include_usage": True},
+                    },
+                ) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data: ") or line == "data: [DONE]":
+                            continue
+                        chunk = json.loads(line[6:])
+                        usage = chunk.get("usage") or usage
+                        choices = chunk.get("choices") or []
+                        delta = (
+                            choices[0].get("delta", {}).get("content")
+                            if choices
+                            else None
+                        )
+                        if delta:
+                            parts.append(delta)
+                            on_delta(delta)
+                return "".join(parts), self._count(usage)
+            except httpx.TransportError:
+                if parts or waited >= SERVER_WAIT_SECONDS:
+                    raise
+                waited += _backoff(attempt)
+                await asyncio.sleep(_backoff(attempt))
+                attempt += 1
 
     async def complete_after(
         self,
@@ -83,27 +186,58 @@ class InferenceClient:
             "continue_final_message": True,
             "add_generation_prompt": False,
         }
+        return await self._logged(payload, self._complete(payload))
+
+    async def _complete(self, payload: dict) -> tuple[str, dict | None]:
         async with self._slots:
             response = await self._post_with_retry("/chat/completions", payload)
-        response.raise_for_status()
-        return str(response.json()["choices"][0]["message"]["content"] or "")
+        return self._reply(response)
 
     async def _post_with_retry(self, path: str, payload: dict) -> httpx.Response:
-        """POST, retrying dropped connections. Seeded requests are idempotent."""
-        for attempt in range(TRANSPORT_RETRIES):
+        """POST, waiting up to SERVER_WAIT_SECONDS for a server that is down or
+        restarting (dropped connections, 502/503). Seeded requests are idempotent."""
+        waited, attempt = 0.0, 0
+        while True:
             try:
-                return await self._client.post(path, json=payload)
+                response = await self._client.post(path, json=payload)
+                if (
+                    response.status_code not in (502, 503)
+                    or waited >= SERVER_WAIT_SECONDS
+                ):
+                    return response
             except httpx.TransportError:
-                if attempt == TRANSPORT_RETRIES - 1:
+                if waited >= SERVER_WAIT_SECONDS:
                     raise
-                await asyncio.sleep(0.5 * 2**attempt)
-        raise AssertionError("unreachable")
+            waited += _backoff(attempt)
+            await asyncio.sleep(_backoff(attempt))
+            attempt += 1
+
+    async def wait_ready(self, timeout: float = SERVER_WAIT_SECONDS) -> None:
+        """Wait until the server answers /models, or fail with a clear error."""
+        waited, attempt = 0.0, 0
+        while True:
+            try:
+                if (await self._client.get("/models")).status_code == 200:
+                    return
+            except httpx.TransportError:
+                pass
+            if waited >= timeout:
+                raise RuntimeError(f"No model server at {self._client.base_url}")
+            waited += _backoff(attempt)
+            await asyncio.sleep(_backoff(attempt))
+            attempt += 1
 
     async def load_adapter(self, name: str, path: Path) -> None:
         """Register a LoRA adapter under `name`. `path` must exist on the server host."""
         response = await self._client.post(
             "/load_lora_adapter",
             json={"lora_name": name, "lora_path": str(path.resolve())},
+        )
+        calllog.record(
+            "adapter_load",
+            name=name,
+            path=str(path.resolve()),
+            status=response.status_code,
         )
         if response.is_error:
             raise RuntimeError(f"vLLM refused adapter {name}: {response.text}")
@@ -112,6 +246,7 @@ class InferenceClient:
         response = await self._client.post(
             "/unload_lora_adapter", json={"lora_name": name}
         )
+        calllog.record("adapter_unload", name=name, status=response.status_code)
         if response.is_error:
             raise RuntimeError(f"vLLM could not unload adapter {name}: {response.text}")
 

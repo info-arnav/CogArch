@@ -1,6 +1,10 @@
-"""One agent's memory: working, episodic and semantic stores.
+"""One agent's episodic memory: specific past problems, recalled when a new
+problem is unusually similar (the hippocampus's pattern completion).
 
-Procedural memory is the agent's fine-tuned weights (see src/training).
+General knowledge is not kept as text: it is learned slowly in the
+fine-tuned weights by sleep replay, as complementary learning systems theory
+places it in the neocortex (see src/training). Working memory is the current
+problem's own attempts and feedback, carried within an attempt loop.
 """
 
 from __future__ import annotations
@@ -11,11 +15,10 @@ from typing import Any
 
 from src.memory.embedder import Embedder
 from src.memory.episodic import EpisodicStore
-from src.memory.models import EpisodicEntry, MemoryContext, SemanticEntry
-from src.memory.semantic import SemanticStore
-from src.memory.working import WorkingMemory
+from src.memory.models import Candidate, EpisodicEntry, MemoryContext
 
-LESSON = "lesson"
+CANDIDATES_SHOWN = 8
+DEFAULT_MIN_SIMILARITY = 0.8
 
 
 class AgentMemory:
@@ -23,38 +26,64 @@ class AgentMemory:
         self,
         directory: Path,
         embedder: Embedder,
-        working_capacity: int = 10,
         retrieve_k: int = 3,
-        min_similarity: float = 0.5,
+        min_similarity: dict[str, float] | None = None,
         max_episodic: int = 2000,
-        lessons_in_prompt: int = 5,
     ) -> None:
         self.episodic = EpisodicStore(directory / "episodic.jsonl")
-        self.semantic = SemanticStore(directory / "semantic.db")
-        self.working = WorkingMemory(capacity=working_capacity)
         self.embedder = embedder
         self.retrieve_k = retrieve_k
-        self.min_similarity = min_similarity
+        self.min_similarity = min_similarity or {}
         self.max_episodic = max_episodic
-        self.lessons_in_prompt = lessons_in_prompt
 
     async def _embed(self, text: str) -> list[float]:
         return await asyncio.to_thread(self.embedder.embed, text)
 
-    # ── waking ────────────────────────────────────────────────────────────────
-
-    async def recall(self, query: str) -> MemoryContext:
-        """Lessons, similar past episodes and recent events relevant to `query`."""
-        episodes = self.episodic.retrieve(
-            await self._embed(query),
-            k=self.retrieve_k,
-            min_similarity=self.min_similarity,
-        )
+    async def recall(
+        self, query: str, domain: str | None = None, touch: bool = True
+    ) -> MemoryContext:
+        """The past problems most similar to `query`, searched across all
+        subjects, kept only when at least `min_similarity[domain]` alike. The
+        cut-off is per subject because the embedding model rates problems that
+        share a template (social questions) as close; it calibrates the model
+        and is never shown to the agent. With `touch` off (evaluation),
+        recalling leaves no trace in the store."""
+        ranked = self.episodic.ranked(await self._embed(query))
+        threshold = self.min_similarity.get(domain or "", DEFAULT_MIN_SIMILARITY)
+        kept = [e for sim, e in ranked if sim >= threshold][: self.retrieve_k]
+        if touch:
+            self.episodic.touch(kept)
+        kept_ids = {e.id for e in kept}
         return MemoryContext(
-            episodic=episodes,
-            semantic=self.lessons()[: self.lessons_in_prompt],
-            working=self.working.get_items(),
+            episodic=kept,
+            candidates=[
+                Candidate(
+                    id=e.id,
+                    similarity=round(sim, 4),
+                    kept=e.id in kept_ids,
+                    task_id=str(e.metadata.get("task_id", "")),
+                    domain=str(e.metadata.get("domain", "")),
+                    solved=e.metadata.get("solved"),
+                )
+                for sim, e in ranked[: max(CANDIDATES_SHOWN, self.retrieve_k)]
+            ],
+            min_similarity=threshold,
         )
+
+    async def search(self, query: str) -> list[tuple[float, EpisodicEntry]]:
+        """Every episode by similarity to `query` (for inspection; no trace)."""
+        return self.episodic.ranked(await self._embed(query))
+
+    def annotate(self, task_id: str, cycle: int, note: str) -> EpisodicEntry | None:
+        """Add what went wrong (found during sleep) to that problem's episode."""
+        for entry in self.episodic.all():
+            meta = entry.metadata
+            if meta.get("task_id") == task_id and meta.get("cycle") == cycle:
+                entry.content += f"\nWhat went wrong: {note}"
+                entry.metadata["what_went_wrong"] = note
+                self.episodic.update(entry)
+                return entry
+        return None
 
     async def record(
         self,
@@ -62,21 +91,16 @@ class AgentMemory:
         key: str,
         importance: float,
         metadata: dict[str, Any],
-    ) -> None:
+    ) -> EpisodicEntry:
         """Store an episode, indexed by the embedding of `key`."""
-        self.episodic.add(
-            EpisodicEntry(
-                content=content,
-                embedding=await self._embed(key),
-                importance=importance,
-                metadata=metadata,
-            )
+        entry = EpisodicEntry(
+            content=content,
+            embedding=await self._embed(key),
+            importance=importance,
+            metadata=metadata,
         )
-
-    def note(self, content: str, importance: float = 0.5) -> None:
-        self.working.add(content, importance=importance)
-
-    # ── sleep ─────────────────────────────────────────────────────────────────
+        self.episodic.add(entry)
+        return entry
 
     def episodes_from_cycle(self, cycle: int) -> list[EpisodicEntry]:
         return [
@@ -85,52 +109,8 @@ class AgentMemory:
             if e.metadata.get("cycle") == cycle
         ]
 
-    def lessons(self) -> list[SemanticEntry]:
-        """Current lessons, most trusted first."""
-        return self.semantic.retrieve(category=LESSON, min_confidence=0.0, limit=50)
-
-    def apply_reflection(
-        self,
-        ops: list[tuple[str, int | None, str]],
-        numbered: list[SemanticEntry],
-        banned_terms: set[str],
-    ) -> list[str]:
-        """Apply ADD / AGREE / DISAGREE / EDIT operations from a sleep reflection.
-
-        `numbered` is the lesson list the reflection saw (1-based). Lessons that
-        mention any banned term (e.g. a problem's function name) are rejected,
-        so lessons stay general instead of memorising specific problems.
-        """
-
-        def allowed(text: str) -> bool:
-            lowered = text.lower()
-            return not any(term.lower() in lowered for term in banned_terms)
-
-        for kind, number, text in ops:
-            target = (
-                numbered[number - 1]
-                if number is not None and 1 <= number <= len(numbered)
-                else None
-            )
-            if kind == "add" and allowed(text):
-                self.semantic.add_or_update(text, LESSON, confidence_delta=0.1)
-            elif kind == "agree" and target is not None:
-                self.semantic.adjust(target.id, 0.1)
-            elif kind == "disagree" and target is not None:
-                self.semantic.adjust(target.id, -0.2)
-            elif kind == "edit" and target is not None and allowed(text):
-                self.semantic.edit(target.id, text)
-        return [entry.concept for entry in self.lessons()]
-
     def prune(self) -> int:
         return self.episodic.prune(max_entries=self.max_episodic)
 
-    def end_session(self) -> None:
-        self.working.clear()
-
     def stats(self) -> dict[str, int]:
-        return {
-            "episodic": len(self.episodic),
-            "semantic": len(self.semantic),
-            "working": len(self.working),
-        }
+        return {"episodic": len(self.episodic)}

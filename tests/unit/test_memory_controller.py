@@ -1,4 +1,4 @@
-"""AgentMemory: recall by similarity, lessons, cycle episodes."""
+"""AgentMemory: recall by similarity across subjects, cycle episodes."""
 
 from src.memory.controller import AgentMemory
 
@@ -12,55 +12,49 @@ class KeywordEmbedder:
         return [float(w in text.lower()) for w in self.WORDS]
 
 
-async def test_recall_similar_episode_and_lessons(tmp_path):
-    memory = AgentMemory(tmp_path, KeywordEmbedder(), min_similarity=0.5)
+async def test_recall_searches_every_subject_and_shows_only_episodes(tmp_path):
+    memory = AgentMemory(tmp_path, KeywordEmbedder(), min_similarity={"code": 0.5})
     await memory.record(
-        "sorted a list", key="Sort a list", importance=0.9, metadata={"cycle": 1}
+        "prime sieve",
+        key="Find prime numbers",
+        importance=0.9,
+        metadata={"cycle": 1, "domain": "code"},
     )
     await memory.record(
-        "prime sieve", key="Find prime numbers", importance=0.9, metadata={"cycle": 1}
+        "sorted cards",
+        key="Sort cards",
+        importance=0.9,
+        metadata={"cycle": 1, "domain": "math"},
     )
-    memory.apply_reflection([("add", None, "Check empty input")], [], set())
-    memory.note("mbpp/3: wrong")
 
-    ctx = await memory.recall("Sort these numbers")
-    assert [e.content for e in ctx.episodic] == ["sorted a list"]
-    text = ctx.to_prompt_text()
-    assert "Check empty input" in text and "mbpp/3: wrong" in text
+    ctx = await memory.recall("Sort these numbers", "code")
+    assert [e.content for e in ctx.episodic] == ["sorted cards"]
+    assert [(c.kept, c.domain) for c in ctx.candidates] == [
+        (True, "math"),
+        (False, "code"),
+    ]
+    assert ctx.episodic[0].recall_count == 1
+    quiet = await memory.recall("Sort these numbers", "code", touch=False)
+    assert quiet.episodic[0].recall_count == 1
+    assert ctx.to_prompt_text() == "## Similar problems you have seen\nsorted cards"
 
 
-async def test_episodes_from_cycle_and_session(tmp_path):
+async def test_cut_off_is_the_problems_subject(tmp_path):
+    memory = AgentMemory(
+        tmp_path, KeywordEmbedder(), min_similarity={"code": 0.99, "math": 0.5}
+    )
+    await memory.record(
+        "half match", key="sort string", importance=0.5, metadata={"cycle": 1}
+    )
+    assert (await memory.recall("sort", "code")).episodic == []
+    assert [e.content for e in (await memory.recall("sort", "math")).episodic] == [
+        "half match"
+    ]
+
+
+async def test_episodes_from_cycle(tmp_path):
     memory = AgentMemory(tmp_path, KeywordEmbedder())
     await memory.record("one", key="sort", importance=0.5, metadata={"cycle": 1})
     await memory.record("two", key="tree", importance=0.5, metadata={"cycle": 2})
     assert [e.content for e in memory.episodes_from_cycle(2)] == ["two"]
-    memory.note("x")
-    memory.end_session()
-    assert memory.stats()["working"] == 0
-
-
-def test_reflection_operations_and_banned_terms(tmp_path):
-    memory = AgentMemory(tmp_path, KeywordEmbedder())
-    memory.apply_reflection(
-        [
-            ("add", None, "Guard against empty lists"),
-            ("add", None, "remove_Occ needs a loop"),
-        ],
-        [],
-        banned_terms={"remove_Occ"},
-    )
-    numbered = memory.lessons()
-    assert [e.concept for e in numbered] == ["Guard against empty lists"]
-
-    memory.apply_reflection([("agree", 1, "")], numbered, set())
-    assert memory.lessons()[0].confidence > numbered[0].confidence
-
-    numbered = memory.lessons()
-    memory.apply_reflection(
-        [("edit", 1, "Guard against empty inputs")], numbered, set()
-    )
-    assert memory.lessons()[0].concept == "Guard against empty inputs"
-
-    for _ in range(4):
-        memory.apply_reflection([("disagree", 1, "")], memory.lessons(), set())
-    assert memory.lessons() == []
+    assert memory.stats() == {"episodic": 2}

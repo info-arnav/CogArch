@@ -1,8 +1,9 @@
 """Code tasks: the MBPP training pool and the EvalPlus benchmarks.
 
 Uses the full MBPP dataset (all splits) minus every task that appears in
-MBPP+, which is reserved for evaluation. Agents see the task description and
-the function signature; the tests stay with the environment.
+MBPP+, which is reserved for evaluation. Agents see the task description, the
+function signature and the first test as an example (as in the MBPP paper);
+the other tests stay with the environment.
 """
 
 from __future__ import annotations
@@ -37,6 +38,30 @@ def signature(code: str, name: str) -> str:
     return match.group(0)
 
 
+def prompt_examples(prompt: str, entry: str) -> list[str]:
+    """Asserts a problem statement shows: MBPP+ asserts, or HumanEval's
+    `>>> call` / expected-output docstring lines and `call == value` examples."""
+    lines = prompt.splitlines()
+    asserts = [line.strip() for line in lines if line.strip().startswith("assert ")]
+    if asserts:
+        return asserts
+    found = []
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith(">>>"):
+            expected = lines[i + 1].strip() if i + 1 < len(lines) else ""
+            if expected and not expected.startswith((">>>", '"""', "'''")):
+                found.append(f"assert ({stripped[3:].strip()}) == ({expected})")
+    if found:
+        return found
+    for m in re.finditer(
+        rf"({entry}\([^\n]*?\))\s*(?:==|➞|=>|->|should return|returns?)\s*([^\n]+)",
+        prompt,
+    ):
+        found.append(f"assert ({m.group(1)}) == ({m.group(2).strip().rstrip('.')})")
+    return found
+
+
 def to_problem(row: dict[str, Any]) -> Task:
     tests = [t.strip() for t in row["test_list"] if t.strip()]
     name = entry_point(row["code"], tests)
@@ -51,6 +76,7 @@ def to_problem(row: dict[str, Any]) -> Task:
         prompt=prompt,
         entry_point=name,
         tests=tests,
+        examples=tests[:1],
         setup_code=row.get("test_setup_code") or "",
     )
 
@@ -97,6 +123,7 @@ def evalplus_tasks(benchmark: str) -> list[Task]:
             prompt=p["prompt"],
             prompt_is_code=True,
             entry_point=p["entry_point"],
+            examples=prompt_examples(p["prompt"], p["entry_point"]),
         )
         for tid, p in problems.items()
     ]

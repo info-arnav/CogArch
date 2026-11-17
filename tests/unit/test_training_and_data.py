@@ -112,18 +112,30 @@ def test_pass_at_1(tmp_path):
     assert pass_at_1(path) == {"base": 0.5, "plus": 0.25}
 
 
-@pytest.mark.parametrize("name", ["general.yaml", "general_solo.yaml", "smoke.yaml"])
+@pytest.mark.parametrize(
+    "name",
+    ["general.yaml", "smoke.yaml", "pilot.yaml", "mac.yaml"]
+    + [f"runs/{p.name}" for p in sorted((CONFIGS / "runs").glob("*.yaml"))],
+)
 def test_configs_load(name):
     cfg = load_config(CONFIGS / name)
     assert cfg.environment.feedback.value == "binary"
     assert set(cfg.agents.seeds) == set(cfg.agents.names)
 
 
-def test_pair_and_solo_differ_only_in_partner():
-    pair, solo = load_config(CONFIGS / "general.yaml"), load_config(
-        CONFIGS / "general_solo.yaml"
-    )
-    assert pair.agents.names == ["a", "b"] and solo.agents.names == ["a"]
-    assert pair.agents.seeds["a"] == solo.agents.seeds["a"]
-    assert pair.training == solo.training and pair.memory == solo.memory
-    assert pair.environment == solo.environment and pair.data == solo.data
+def test_each_setting_differs_from_full_only_in_its_switch():
+    full = load_config(CONFIGS / "runs/full.yaml")
+    solo = load_config(CONFIGS / "runs/solo.yaml")
+    assert full.agents.names == ["a", "b"] and solo.agents.names == ["a"]
+    assert full.agents.seeds["a"] == solo.agents.seeds["a"]
+    assert full.training == solo.training and full.memory == solo.memory
+    assert full.environment == solo.environment and full.data == solo.data
+    no_memory = load_config(CONFIGS / "runs/no-memory.yaml")
+    assert not no_memory.memory.enabled and no_memory.training == full.training
+    neutral = load_config(CONFIGS / "runs/neutral.yaml")
+    assert neutral.agents.personas == "neutral" and neutral.memory == full.memory
+    no_sharing = load_config(CONFIGS / "runs/no-sharing.yaml")
+    assert not no_sharing.agents.share_discoveries and no_sharing.agents.names == [
+        "a",
+        "b",
+    ]

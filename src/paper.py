@@ -482,15 +482,12 @@ def fig_specialisation(
                 color=SPECIALIST_COLORS[s],
                 label=s,
             )
-        ax.axhline(25, color="#8a8984", linewidth=0.8, linestyle="--")
-        ax.text(
-            len(domains) - 0.5,
-            25.6,
-            "uniform",
-            ha="right",
-            va="bottom",
-            fontsize=5.8,
+        ax.axhline(
+            25,
             color="#8a8984",
+            linewidth=0.8,
+            linestyle="--",
+            label="even split (first rule)",
         )
         ax.set_ylabel("Share of training (%)")
         ax.set_ylim(0, max(50.0, ax.get_ylim()[1]))
@@ -499,7 +496,7 @@ def fig_specialisation(
     axes[-1].set_xticks(range(len(domains)), [d.capitalize() for d in domains])
     handles, labels = axes[0].get_legend_handles_labels()
     axes[0].legend(
-        handles, labels, ncol=4, loc="upper left", handlelength=1.0, columnspacing=0.9
+        handles, labels, ncol=5, loc="upper left", handlelength=1.4, columnspacing=0.9
     )
     fig.tight_layout()
     return _save(fig, out, "specialisation")
@@ -707,7 +704,7 @@ def fig_method(out: Path) -> str:
     for x in cols:
         tx = coord_x + (x - coord_x) * 0.38
         arrow([(x, 17.1), (x, 14.0), (tx, 14.0), (tx, 11.4)])
-    box(11.0, 9.0, 11.5, 4.8, "Memory\nepisodes, lessons", fills["plain"], size=5.8)
+    box(11.0, 9.0, 11.5, 4.8, "Memory\npast episodes", fills["plain"], size=5.8)
     arrow([(16.75, 9.0), (coord_x - 11, 9.0)])
 
     # ── environment and partner ──
@@ -727,7 +724,7 @@ def fig_method(out: Path) -> str:
     # ── sleep ──
     panel(81, 3, 17, 40, "Sleep: after each cycle")
     steps = [
-        "Reflect\nedit lessons",
+        "Reflect\nnote what went wrong",
         "Credit\nsolo winner, else\ndomain owner",
         "Train\nDPO + NLL on each\npart's own LoRA",
         "Validate\nroll back if worse",
@@ -743,7 +740,7 @@ def fig_method(out: Path) -> str:
 
 def fig_memory(out: Path) -> str:
     """The agent's three memories: what is recalled before an answer, what is
-    written after it, and how sleep edits the lessons."""
+    written after it, and how sleep turns experience into trained weights."""
     plt = _plt()
     fills = DIAGRAM_FILLS
     fig, ax = plt.subplots(figsize=(FULL_WIDTH, 2.35))
@@ -769,17 +766,17 @@ def fig_memory(out: Path) -> str:
     stores = [
         (
             31.0,
-            "Working memory  (short-term)\nlast 10 events · cleared every cycle",
+            "Working memory  (prefrontal)\nthis problem's attempts and feedback",
             fills["spec"],
         ),
         (
             19.5,
-            "Episodic memory  (hippocampus)\nevery past task · 3 most similar recalled",
+            "Episodic memory  (hippocampus)\nevery past problem · 3 most similar recalled",
             fills["coord"],
         ),
         (
             8.0,
-            "Semantic memory  (cortex)\nlessons · 5 most trusted recalled",
+            "General knowledge  (cortex)\nin the trained weights · learned by replay",
             fills["world"],
         ),
     ]
@@ -834,7 +831,7 @@ def fig_memory(out: Path) -> str:
         8.0,
         22,
         7.4,
-        "Sleep: reflect\ncompare wrong and accepted\nanswers; add, agree,\ndisagree or edit lessons",
+        "Sleep: reflect, then train\nnote what went wrong in\neach episode; train the\nweights with replay",
         fills["plain"],
         size=5.7,
     )
@@ -845,7 +842,7 @@ def fig_memory(out: Path) -> str:
         dx=-1.0,
         dy=-2.6,
     )
-    arrow([(74, 8.0), (61.5, 8.0)], "edited lessons", dy=0.5)
+    arrow([(74, 8.0), (61.5, 8.0)], "trained weights", dy=0.5)
 
     fig.tight_layout()
     return _save(fig, out, "memory")
@@ -890,7 +887,7 @@ def fig_sleep(out: Path) -> str:
     # ── right: sleep ──
     panel(49, 2, 50, 31, "Sleep: after every 100 tasks")
     steps = [
-        (58.5, "Reflect\nedit lessons\n(Sec. 3.3)"),
+        (58.5, "Reflect\nwhat went wrong\n(Sec. 3.3)"),
         (69.5, "Pick who learns\nfive rules\n(Sec. 3.4)"),
         (80.5, "Train each part\nDPO + NLL on its\nown adapter"),
         (91.5, "Validate\nkeep, or\nroll back"),
@@ -920,3 +917,86 @@ def fig_sleep(out: Path) -> str:
 
     fig.tight_layout()
     return _save(fig, out, "sleep")
+
+
+def fig_persona_maths(
+    groups: dict[str, list[dict[str, Any]]], baseline: dict[str, Any], out: Path
+) -> str:
+    """GSM8K of each specialist with and without its persona: the maths is lost
+    only when the trained weights answer with the persona."""
+    import random
+
+    plt = _plt()
+    names = ["logical", "creative", "skeptical", "empathetic"]
+    pct = lambda e: 100 * e["scores"]["gsm8k"]["accuracy"]  # noqa: E731
+    start = {
+        e["system"].split("/")[-1]: pct(e)
+        for e in baseline["baseline_benchmarks"]
+        if e["mode"] == "specialist"
+    }
+    plain_start = next(
+        pct(e) for e in baseline["baseline_benchmarks"] if e["mode"] == "plain"
+    )
+    runs = [r for rs in groups.values() for r in rs]
+
+    def after(mode: str, s: str) -> list[float]:
+        return [
+            pct(e)
+            for r in runs
+            for e in r["final_benchmarks"]
+            if e["mode"] == mode and e["system"].endswith("/" + s)
+        ]
+
+    fig, ax = plt.subplots(figsize=(ONE_COLUMN * 1.55, 2.1))
+    width = 0.26
+    rng = random.Random(0)
+    bars = [
+        ("With persona, before", "#d6d4cc", None, lambda s: [start[s]]),
+        ("With persona, after", "#3a3936", None, lambda s: after("specialist", s)),
+        ("Plain weights, after", "white", "////", lambda s: after("plain", s)),
+    ]
+    for k, (label, color, hatch, values) in enumerate(bars):
+        xs = [i + (k - 1) * width for i in range(len(names))]
+        means = [statistics.mean(values(s)) for s in names]
+        ax.bar(
+            xs,
+            means,
+            width * 0.92,
+            color=color,
+            hatch=hatch,
+            edgecolor="#3a3936",
+            linewidth=0.6,
+            label=label,
+        )
+        if k > 0:
+            for x, s in zip(xs, names):
+                pts = values(s)
+                ax.scatter(
+                    [x + rng.uniform(-0.07, 0.07) for _ in pts],
+                    pts,
+                    s=5,
+                    facecolor="white" if k == 1 else "#3a3936",
+                    edgecolor="#3a3936",
+                    linewidth=0.4,
+                    zorder=3,
+                )
+    ax.axhline(
+        plain_start,
+        color="#8a8984",
+        linestyle="--",
+        linewidth=0.8,
+        label="Plain model, before",
+    )
+    ax.set_xticks(range(len(names)), [s.capitalize() for s in names])
+    ax.set_ylabel("GSM8K accuracy (%)")
+    ax.set_ylim(0, 92)
+    ax.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.3),
+        ncol=2,
+        fontsize=6,
+        handlelength=1.4,
+        columnspacing=1.0,
+    )
+    fig.tight_layout()
+    return _save(fig, out, "persona_maths")

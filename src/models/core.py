@@ -33,6 +33,10 @@ class Task(BaseModel):
     tests: list[str] = Field(
         default_factory=list, description="Hidden asserts, kind=code"
     )
+    examples: list[str] = Field(
+        default_factory=list,
+        description="Asserts the problem statement shows (kind=code); used to try code",
+    )
     setup_code: str = ""
     answer: str = Field(default="", description="Hidden gold answer for math/choice")
     max_attempts: int | None = Field(
@@ -83,10 +87,38 @@ class Proposal(BaseModel):
     answer: str
 
 
+class Evidence(BaseModel):
+    """What can be checked about the positions without a model.
+
+    Every position's extracted answer; for code, how many of the problem's
+    shown examples it passes and which positions behave identically on the
+    team's own test inputs (CodeT-style agreement)."""
+
+    answers: dict[str, str] = Field(default_factory=dict)
+    examples: dict[str, list[int]] = Field(
+        default_factory=dict, description="position -> [examples passed, examples]"
+    )
+    groups: list[list[str]] = Field(
+        default_factory=list, description="positions that agree with each other"
+    )
+    differences: list[dict] = Field(
+        default_factory=list,
+        description="code: test inputs on which the groups' outputs differ, "
+        "{call, outputs: [[group, output], ...]}",
+    )
+
+    @property
+    def unanimous(self) -> bool:
+        return len(self.groups) == 1 and all(self.answers.values())
+
+
 class Decision(BaseModel):
-    """One attempt: propose → discuss → decide → judged by the world."""
+    """One attempt: propose → (discuss if they disagree) → choose → judged."""
 
     attempt_number: int
+    labels: dict[str, str] = Field(
+        default_factory=dict, description="specialist -> letter the coordinator sees"
+    )
     calls: list[LLMCall] = Field(default_factory=list)
     round1: list[Proposal]
     round2: list[Proposal]
@@ -95,10 +127,34 @@ class Decision(BaseModel):
         description="Each specialist's round-1 prompt without memory (training prompt)",
     )
     coordinator_prompt: list[Message] = Field(
-        description="The coordinator's prompt without memory (training prompt)"
+        default_factory=list,
+        description="The coordinator's prompt without memory (training prompt); "
+        "empty when the specialists agreed and no choice was needed",
     )
-    coordinator_output: str
-    answer: str = Field(description="The final answer extracted from the coordinator")
+    coordinator_output: str = ""
+    rejected_all: bool = Field(
+        default=False,
+        description="The coordinator first sent the team back to try again; round 2 "
+        "holds the second answers",
+    )
+    could_reject: bool = Field(
+        default=False,
+        description="The final choice was allowed to send the team back (it had not "
+        "been sent back already)",
+    )
+    first_choice_prompt: list[Message] = Field(default_factory=list)
+    first_choice_output: str = ""
+    discussed: bool = True
+    probes: list[str] = Field(default_factory=list)
+    evidence: Evidence = Field(default_factory=Evidence)
+    chosen: str = Field(description="The specialist whose position was submitted")
+    chosen_by: str = Field(
+        description="coordinator, majority (the one largest agreeing group), "
+        "agreement (all specialists agreed), or fallback (the coordinator named "
+        "no valid position)"
+    )
+    submitted: str = Field(description="The full reply that was submitted")
+    answer: str = Field(description="The answer extracted from the submitted reply")
     result: Verdict
 
 
@@ -139,7 +195,6 @@ class RoundResult(BaseModel):
         description="agent -> 'attempt:round:specialist' -> answer matches the known one",
     )
     probes: dict[str, list[str]] = Field(default_factory=dict)
-    probe_calls: dict[str, LLMCall] = Field(default_factory=dict)
 
 
 class PreferencePair(BaseModel):
@@ -151,6 +206,11 @@ class PreferencePair(BaseModel):
     chosen: str
     rejected: str
     source: str = Field(description="who found the chosen answer: 'self' or a peer")
+    chosen_from: str = Field(
+        default="own",
+        description="own (the specialist's right answer), known (the accepted reply), "
+        "rationalized (the specialist's own reasoning to the known answer), anchor",
+    )
     responsibility: str = Field(
         default="",
         description="winner (got it right) or owner (best domain record when nobody did)",
@@ -192,8 +252,15 @@ class CycleMetrics(BaseModel):
     validation_specialists: dict[str, dict[str, dict[str, float]]] = Field(
         default_factory=dict, description="agent -> specialist -> domain -> solo Pass@1"
     )
+    validation_specialists_no_persona: dict[str, dict[str, dict[str, float]]] = Field(
+        default_factory=dict,
+        description="agent -> specialist -> domain -> solo Pass@1, same weights, no persona",
+    )
     rolled_back: list[str] = Field(default_factory=list)
-    lessons: dict[str, list[str]] = Field(default_factory=dict)
+    replayed: dict[str, dict[str, int]] = Field(
+        default_factory=dict,
+        description="agent -> role -> pairs replayed from earlier cycles",
+    )
     reflections: dict[str, LLMCall] = Field(default_factory=dict)
     answer_divergence: float | None = None
     outcome_disagreement: float | None = None
@@ -216,6 +283,9 @@ class ExperimentReport(BaseModel):
     baseline_validation_specialists: dict[str, dict[str, dict[str, float]]] = Field(
         default_factory=dict
     )
+    baseline_validation_specialists_no_persona: dict[
+        str, dict[str, dict[str, float]]
+    ] = Field(default_factory=dict)
     baseline_benchmarks: list[BenchmarkScores] = Field(default_factory=list)
     cycles: list[CycleMetrics] = Field(default_factory=list)
     final_benchmarks: list[BenchmarkScores] = Field(default_factory=list)

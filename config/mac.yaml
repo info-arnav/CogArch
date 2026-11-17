@@ -1,0 +1,78 @@
+# Laptop test of the whole loop on Apple silicon, watched live:
+#   cogarch serve-local --port 8100        (model server, MPS)
+#   cogarch serve-local --model IAAR-Shanghai/xVerify-3B-Ia --port 8101   (grader)
+#   cogarch dashboard                      (http://127.0.0.1:8080)
+#   cogarch run config/mac.yaml
+
+model:
+  base: "Qwen/Qwen2.5-1.5B-Instruct"
+  served_name: "Qwen/Qwen2.5-1.5B-Instruct"
+  max_tokens: 2048
+
+inference:
+  base_url: "http://127.0.0.1:8100/v1"
+  max_concurrent_requests: 64
+
+grading:
+  verifier_url: "http://127.0.0.1:8101/v1"
+  verifier_model: "IAAR-Shanghai/xVerify-3B-Ia"
+  extract_code_with_model: true
+
+agents:
+  names: [a, b]
+  seeds: {a: 11, b: 22}
+  specialists: [logical, creative, skeptical, empathetic]
+  share_discoveries: true
+  discussion: disagreement
+
+environment:
+  max_attempts: 3
+  feedback: binary
+  execution_timeout_seconds: 10
+  memory_limit_mb: 1024
+  probes_per_problem: 6
+
+data:
+  domains: [code, math, reasoning, social]
+  validation_per_domain: 1
+  split_seed: 0
+
+training:
+  enabled: true
+  lora_rank: 16
+  lora_alpha: 32
+  learning_rate: 2.0e-5
+  beta: 0.1
+  nll_weight: 1.0
+  epochs: 2
+  batch_size: 2
+  grad_accumulation: 1
+  max_length: 2048
+  min_pairs: 2
+  global_slots: 2
+  rollback_threshold: 0.25
+  rationalize: true
+  anchor_ratio: 0.5
+
+memory:
+  enabled: true
+  embedding_model: "BAAI/bge-small-en-v1.5"
+  max_episodic: 2000
+  retrieve_k: 3
+
+evaluation:
+  benchmarks: []
+  validation_samples: 1
+  specialists: true
+  plain: false
+  memory: true
+
+events:
+  stream_tokens: true
+
+experiment:
+  name: mac-test
+  cycles: 2
+  rounds_per_cycle: 12
+  round_batch_size: 4
+  output_dir: data/runs

@@ -55,7 +55,7 @@ Training domains: code (MBPP minus MBPP+), maths (GSM8K train), reasoning (ARC-C
 | Config | Condition |
 |---|---|
 | `config/general.yaml` | Two agents teaching each other |
-| `config/general_solo.yaml` | One agent alone (same system, no partner) |
+| `config/runs/*.yaml` | Every setting of the full experiment (full design and each ablation; see `docs/preregistration.md`) |
 | `cogarch baseline` | The untrained system, benchmarked once |
 
 ## Trained adapters

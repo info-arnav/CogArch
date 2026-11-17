@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from enum import Enum
 from pathlib import Path
+from typing import Literal
 
 import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field, model_validator
@@ -23,7 +24,7 @@ class FeedbackLevel(str, Enum):
 class ModelConfig(BaseModel):
     base: str = Field(description="Hugging Face id of the base model")
     served_name: str = Field(description="Model name the vLLM server exposes")
-    max_tokens: int = 768
+    max_tokens: int = 2048
 
 
 class InferenceConfig(BaseModel):
@@ -32,13 +33,47 @@ class InferenceConfig(BaseModel):
     max_concurrent_requests: int = 64
 
 
+class GradingConfig(BaseModel):
+    """xVerify judges maths and choice replies (MASLab's default grader); the
+    base model extracts code when EvalPlus's sanitiser finds none. Without a
+    verifier URL, rule-based extraction grades instead (tests only)."""
+
+    verifier_url: str | None = None
+    verifier_model: str = "IAAR-Shanghai/xVerify-3B-Ia"
+    extract_code_with_model: bool = True
+
+
 class AgentsConfig(BaseModel):
     names: list[str] = Field(min_length=1)
     seeds: dict[str, int]
     specialists: list[str] = Field(min_length=1)
     share_discoveries: bool = True
-    discussion: bool = Field(
-        default=True, description="Specialists revise after seeing each other's answers"
+    discussion: Literal["disagreement", "always", "never"] = Field(
+        default="disagreement",
+        description="When specialists discuss: only when their answers disagree "
+        "(default), on every problem, or never",
+    )
+    personas: Literal["full", "neutral"] = Field(
+        default="full",
+        description="Specialists' system prompts: their personas, or one neutral "
+        "team prompt for all (the no-persona control)",
+    )
+    selector: Literal["coordinator", "majority"] = Field(
+        default="coordinator",
+        description="Who picks the submitted position when specialists disagree: "
+        "the coordinator, or the largest agreeing group with the coordinator "
+        "breaking ties",
+    )
+    allow_retry: bool = Field(
+        default=True,
+        description="The coordinator may reject every answer once per attempt and "
+        "send the specialists back to answer again",
+    )
+    discussion_style: Literal["critique", "hold", "du"] = Field(
+        default="critique",
+        description="Discussion instructions (src/inference/prompts.DISCUSSION_RULES): "
+        "critique each teammate; critique but keep one's answer unless shown a "
+        "mistake; or Du et al.'s debate prompt",
     )
 
     @model_validator(mode="after")
@@ -95,6 +130,27 @@ class TrainingConfig(BaseModel):
     surprise_threshold: float | None = Field(
         default=0.5, description="Surprising pairs count twice (None disables)"
     )
+    owner_learns: bool = Field(
+        default=True,
+        description="When no specialist was right alone, the one with the best "
+        "domain record learns the found answer",
+    )
+    rationalize: bool = Field(
+        default=True,
+        description="When a specialist learns an answer someone else found, train on "
+        "its own reasoning to that answer (checked to reach it) instead of the "
+        "other's reply",
+    )
+    replay_ratio: float = Field(
+        default=0.5,
+        description="Sleep replay: pairs from earlier cycles mixed into each "
+        "training set, as a share of the new pairs (0 disables)",
+    )
+    anchor_ratio: float = Field(
+        default=0.5,
+        description="Extra pairs from the specialist's own right answers in every "
+        "domain, as a share of its main pairs (0 disables)",
+    )
     global_slots: int = Field(
         default=4,
         description="DPO jobs allowed at once on this machine, across all runs",
@@ -106,12 +162,19 @@ class TrainingConfig(BaseModel):
 class MemoryConfig(BaseModel):
     enabled: bool = True
     embedding_model: str = "BAAI/bge-small-en-v1.5"
-    working_capacity: int = 10
     max_episodic: int = 2000
     retrieve_k: int = 3
-    min_similarity: float = 0.5
-    lessons_per_sleep: int = 5
-    lessons_in_prompt: int = 5
+    min_similarity: dict[str, float] = Field(
+        default_factory=lambda: {
+            "code": 0.815,
+            "math": 0.746,
+            "reasoning": 0.689,
+            "social": 0.824,
+        },
+        description="Per domain: the 99.5th percentile of similarity between random "
+        "training problems (bge-small-en-v1.5), so only unusually close problems "
+        "are recalled",
+    )
 
 
 class EvaluationConfig(BaseModel):
@@ -136,8 +199,17 @@ class EvaluationConfig(BaseModel):
     subset_seed: int = 0
     samples: int = Field(default=1, ge=1, description="Answers per task, agent mode")
     validation_samples: int = Field(default=2, ge=1)
+    specialists_every_cycle: bool = Field(
+        default=False,
+        description="Validate each specialist alone (with and without persona) "
+        "after every sleep; otherwise only before training and after the last cycle",
+    )
     specialists: bool = Field(
         default=True, description="Score each specialist alone with its persona"
+    )
+    memory: bool = Field(
+        default=True,
+        description="The whole agent reads (never writes) its memory on benchmarks",
     )
     plain: bool = Field(
         default=True,
@@ -155,6 +227,13 @@ class EvaluationConfig(BaseModel):
         return self
 
 
+class EventsConfig(BaseModel):
+    stream_tokens: bool = Field(
+        default=False,
+        description="Log every reply as it is generated (for watching live)",
+    )
+
+
 class ExperimentConfig(BaseModel):
     name: str
     cycles: int = Field(default=5, ge=1)
@@ -170,12 +249,14 @@ class ExperimentConfig(BaseModel):
 class Config(BaseModel):
     model: ModelConfig
     inference: InferenceConfig = InferenceConfig()
+    grading: GradingConfig = GradingConfig()
     agents: AgentsConfig
     environment: EnvironmentConfig = EnvironmentConfig()
     data: DataConfig = DataConfig()
     training: TrainingConfig = TrainingConfig()
     memory: MemoryConfig = MemoryConfig()
     evaluation: EvaluationConfig = EvaluationConfig()
+    events: EventsConfig = EventsConfig()
     experiment: ExperimentConfig
 
     @property
@@ -186,12 +267,17 @@ class Config(BaseModel):
 def load_config(path: Path | str) -> Config:
     """Load and validate a config file.
 
-    The INFERENCE_BASE_URL environment variable overrides inference.base_url.
+    For machines with several GPUs, environment variables place a run:
+    INFERENCE_BASE_URL (its model server), VERIFIER_URL (the grader) and
+    TRAINING_SLOTS_DIR (training slots shared by the runs on its GPU).
     """
     with open(path) as f:
         raw = yaml.safe_load(f)
     cfg = Config.model_validate(raw)
-    base_url = os.environ.get("INFERENCE_BASE_URL")
-    if base_url:
+    if base_url := os.environ.get("INFERENCE_BASE_URL"):
         cfg.inference.base_url = base_url
+    if verifier := os.environ.get("VERIFIER_URL"):
+        cfg.grading.verifier_url = verifier
+    if slots := os.environ.get("TRAINING_SLOTS_DIR"):
+        cfg.training.slots_dir = Path(slots)
     return cfg

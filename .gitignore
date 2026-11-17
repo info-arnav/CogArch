@@ -101,3 +101,5 @@ paper/*.out
 
 # Paper draft (kept out of the repository)
 paper/
+data/v2-view/
+data/paper-analysis/

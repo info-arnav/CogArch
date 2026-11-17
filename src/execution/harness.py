@@ -48,8 +48,19 @@ def _run_probes(payload: dict, namespace: dict) -> list[str]:
     return outputs
 
 
+def _limit_memory(megabytes: int) -> None:
+    """Address-space cap (Linux; macOS does not enforce RLIMIT_AS)."""
+    if not sys.platform.startswith("linux"):
+        return
+    import resource
+
+    limit = megabytes * 1024 * 1024
+    resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+
+
 def main() -> None:
     payload = json.load(sys.stdin)
+    _limit_memory(payload["memory_limit_mb"])
     namespace, load_error = _load(payload)
     result: dict = {"load_error": load_error}
     if load_error is None:

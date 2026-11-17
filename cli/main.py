@@ -80,26 +80,33 @@ def baseline(
 
 
 @app.command()
-def reference(
+def baselines(
     config: str = typer.Argument("config/general.yaml"),
-    model: str = typer.Option(
-        ..., help="Served model name, e.g. Qwen/Qwen2.5-7B-Instruct"
+    method: str = typer.Option(
+        "majority", help="single, majority, debate or moa (see src/baselines.py)"
     ),
-    label: str = typer.Option(..., help="Name in tables, e.g. 'Qwen2.5-7B'"),
-    base_url: str = typer.Option("http://localhost:8000/v1"),
-    majority: int = typer.Option(
-        1, help="Answers per problem for majority vote (1 = plain)"
-    ),
+    calls: int = typer.Option(9, help="Model calls per problem (the team uses 9)"),
+    model: str = typer.Option("", help="Served model (default: the config's base)"),
+    base_url: str = typer.Option("", help="Override the inference server"),
 ) -> None:
-    """Score a reference system (bigger model, or majority vote) on the benchmarks."""
-    from src.references import evaluate_reference
+    """Score a published method on the benchmarks, graded like the team."""
+    from src.baselines import run_baseline
 
     cfg = load_config(config)
-    print(
-        asyncio.run(
-            evaluate_reference(cfg, label, model, base_url, majority, Console())
-        )
-    )
+    if base_url:
+        cfg.inference.base_url = base_url
+    print(asyncio.run(run_baseline(cfg, method, model or None, calls, Console())))
+
+
+@app.command("prompt-study")
+def prompt_study(
+    config: str = typer.Argument("config/general.yaml"),
+    per_domain: int = typer.Option(50, help="Practice problems per domain"),
+) -> None:
+    """Compare personas, discussion styles and the coordinator on practice problems."""
+    from src.prompt_study import run_study
+
+    print(asyncio.run(run_study(load_config(config), per_domain, Console())))
 
 
 @app.command()
@@ -110,9 +117,28 @@ def dashboard(
     """Serve the live dashboard on 127.0.0.1 (public link: scripts/tunnel.sh)."""
     from pathlib import Path
 
-    from src.dashboard import serve
+    from src.live.server import serve
 
     serve(Path(runs), port=port)
+
+
+@app.command("serve-local")
+def serve_local(
+    model: str = typer.Option("Qwen/Qwen2.5-1.5B-Instruct"),
+    port: int = typer.Option(8000),
+    max_batch: int = typer.Option(48),
+) -> None:
+    """Serve a model on this machine (Apple MPS, CUDA or CPU) with vLLM's API."""
+    import uvicorn
+
+    from src.inference.local_server import Engine, build_app
+
+    uvicorn.run(
+        build_app(Engine(model, max_batch)),
+        host="127.0.0.1",
+        port=port,
+        log_level="warning",
+    )
 
 
 @app.command()
@@ -121,9 +147,6 @@ def analyze(
     out: str = typer.Option("data/analysis", help="Where to write tables and figures"),
     include_unfinished: bool = typer.Option(
         False, help="Also use runs stopped before their final benchmarks"
-    ),
-    compare: str = typer.Option(
-        "", help="Earlier version's runs folder, for the specialisation comparison"
     ),
 ) -> None:
     """Aggregate runs into tables (summary.md, tables.tex) and figures."""
@@ -136,7 +159,6 @@ def analyze(
             Path(runs),
             Path(out),
             include_unfinished,
-            Path(compare) if compare else None,
         )
     )
 

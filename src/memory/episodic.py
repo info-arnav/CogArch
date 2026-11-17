@@ -51,27 +51,28 @@ class EpisodicStore:
         self._cache.append(entry)
         self._append(entry)
 
-    def retrieve(
-        self,
-        query_embedding: list[float],
-        k: int = 3,
-        min_similarity: float = 0.4,
-    ) -> list[EpisodicEntry]:
-        """Return the top-K entries most similar to the query embedding."""
+    def ranked(self, query_embedding: list[float]) -> list[tuple[float, EpisodicEntry]]:
+        """Every entry by similarity to the query."""
         scored = [
             (cosine_similarity(query_embedding, e.embedding), e)
             for e in self._cache
             if e.embedding
         ]
         scored.sort(key=lambda x: x[0], reverse=True)
-        results = [e for sim, e in scored if sim >= min_similarity][:k]
+        return scored
 
+    def touch(self, entries: list[EpisodicEntry]) -> None:
         now = datetime.now(timezone.utc).isoformat()
-        for entry in results:
+        for entry in entries:
             entry.recall_count += 1
             entry.last_recalled = now
 
-        return results
+    def update(self, entry: EpisodicEntry) -> None:
+        self._cache = [entry if e.id == entry.id else e for e in self._cache]
+        self._rewrite()
+
+    def all(self) -> list[EpisodicEntry]:
+        return list(self._cache)
 
     def get_recent(self, n: int = 50) -> list[EpisodicEntry]:
         return sorted(self._cache, key=lambda e: e.timestamp, reverse=True)[:n]

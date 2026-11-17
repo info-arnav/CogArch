@@ -30,46 +30,29 @@ class EpisodicEntry(BaseModel):
     last_recalled: str | None = None
 
 
-class SemanticEntry(BaseModel):
-    """A general lesson distilled from many episodes during sleep."""
+class Candidate(BaseModel):
+    """One stored episode considered during a recall."""
 
-    id: str = Field(default_factory=_uuid)
-    concept: str
-    category: str
-    evidence_count: int = 1
-    confidence: float = 0.5  # strengthens each time the lesson is re-derived
-    created_at: str = Field(default_factory=_now)
-    updated_at: str = Field(default_factory=_now)
-
-
-class WorkingMemoryItem(BaseModel):
-    """An item held in the current session's context."""
-
-    content: str
-    importance: float = 0.5
-    source: str = ""
-    timestamp: str = Field(default_factory=_now)
+    id: str
+    similarity: float
+    kept: bool
+    task_id: str = ""
+    domain: str = ""
+    solved: bool | None = None
 
 
 class MemoryContext(BaseModel):
-    """What an agent recalls before working on a problem."""
+    """What an agent recalls before working on a problem, and how it chose it."""
 
     episodic: list[EpisodicEntry] = Field(default_factory=list)
-    semantic: list[SemanticEntry] = Field(default_factory=list)
-    working: list[WorkingMemoryItem] = Field(default_factory=list)
+    candidates: list[Candidate] = Field(
+        default_factory=list, description="The closest episodes, kept or not"
+    )
+    min_similarity: float = 0.0
 
     def to_prompt_text(self) -> str:
-        parts: list[str] = []
-        if self.semantic:
-            parts.append("## Lessons you have learned")
-            parts.extend(f"- {s.concept}" for s in self.semantic)
-        if self.episodic:
-            parts.append("## Similar problems you have seen")
-            parts.extend(e.content for e in self.episodic)
-        if self.working:
-            parts.append("## Recent events")
-            parts.extend(f"- {w.content}" for w in self.working)
-        return "\n".join(parts)
-
-    def is_empty(self) -> bool:
-        return not (self.working or self.semantic or self.episodic)
+        if not self.episodic:
+            return ""
+        return "\n".join(
+            ["## Similar problems you have seen", *(e.content for e in self.episodic)]
+        )

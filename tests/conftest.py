@@ -9,6 +9,7 @@ import pytest
 from src.config import FeedbackLevel
 from src.environment import Environment
 from src.execution.sandbox import Sandbox
+from src.grading import RULE_GRADER
 from src.inference.agent import Agent, Role
 from src.inference.prompts import load_coordinator, load_specialist
 from src.models.core import Message, Task
@@ -24,7 +25,7 @@ def role_of(system: str) -> str:
         return "coordinator"
     if system.startswith("You write example calls"):
         return "probes"
-    if system.startswith("You maintain"):
+    if system.startswith("You review a team"):
         return "reflect"
     for name in SPECIALISTS:
         if name.capitalize() in system:
@@ -50,6 +51,7 @@ class ScriptedChat:
         temperature: float,
         max_tokens: int,
         seed: int,
+        on_delta=None,  # noqa: ANN001
     ) -> str:
         role = role_of(messages[0].content)
         stage = stage_of(role, messages[-1].content)
@@ -64,7 +66,7 @@ def make_agent(
     name: str = "a",
     max_attempts: int = 3,
     memory=None,
-    discussion: bool = True,
+    discussion: str = "always",
 ) -> Agent:
     sandbox = Sandbox(FeedbackLevel.BINARY, timeout_seconds=5)
     return Agent(
@@ -73,7 +75,7 @@ def make_agent(
         specialists={n: Role(load_specialist(n), "base") for n in SPECIALISTS},
         coordinator=Role(load_coordinator(), "base"),
         client=chat,
-        environment=Environment(sandbox, FeedbackLevel.BINARY),
+        environment=Environment(sandbox, FeedbackLevel.BINARY, RULE_GRADER),
         memory=memory,
         max_attempts=max_attempts,
         max_tokens=256,

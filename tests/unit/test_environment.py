@@ -9,6 +9,7 @@ from src.environment import (
     extract_math,
 )
 from src.execution.sandbox import Sandbox
+from src.grading import RULE_GRADER
 
 
 class TestExtraction:
@@ -52,16 +53,20 @@ class TestMatching:
 class TestJudge:
     def env(self) -> Environment:
         return Environment(
-            Sandbox(FeedbackLevel.BINARY, timeout_seconds=5), FeedbackLevel.BINARY
+            Sandbox(FeedbackLevel.BINARY, timeout_seconds=5),
+            FeedbackLevel.BINARY,
+            RULE_GRADER,
         )
 
     async def test_math_only_told_wrong(self, math_task):
-        verdict = await self.env().judge(math_task, "41")
+        verdict = await self.env().judge(math_task, "So it is \\boxed{41}")
         assert not verdict.passed and verdict.feedback == "Your answer is wrong."
         assert "42" not in verdict.feedback
 
     async def test_choice_right(self, choice_task):
-        assert (await self.env().judge(choice_task, "B")).passed
+        assert (
+            await self.env().judge(choice_task, "Sad fits.\nFINAL ANSWER: B")
+        ).passed
 
     async def test_code_runs_hidden_tests(self, add_task):
         assert (

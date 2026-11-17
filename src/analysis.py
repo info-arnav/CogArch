@@ -230,7 +230,6 @@ def analyze(
     runs_root: Path,
     out: Path,
     include_unfinished: bool = False,
-    compare_runs: Path | None = None,
 ) -> Path:
     from src import figures as extra
     from src import paper
@@ -258,17 +257,7 @@ def analyze(
     cycles_md = ""
     if groups:
         written.append(paper.fig_learning_curves(groups, out))
-        versions = {
-            "Who learned each domain": [r for rs in groups.values() for r in rs]
-        }
-        if compare_runs is not None:
-            _, earlier = load(compare_runs, include_unfinished=True)
-            versions = {
-                "v1: credit to everyone right after discussion": [
-                    r for rs in earlier.values() for r in rs
-                ],
-                "v2: brain-inspired competition": versions["Who learned each domain"],
-            }
+        versions = {"Brain-inspired rules": [r for rs in groups.values() for r in rs]}
         spec = paper.fig_specialisation(versions, out)
         if spec:
             written.append(spec)

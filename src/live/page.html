@@ -1,0 +1,770 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CogArch Live</title>
+<style>
+:root{
+  --bg:#f6f5f2;--panel:#ffffff;--panel2:#faf9f7;--ink:#1d1d1f;--ink2:#4a4a50;--muted:#86868b;--line:#e4e2dd;--line2:#efede9;
+  --logical:#2a78d6;--creative:#eb6834;--skeptical:#8b5cf6;--empathetic:#1baf7a;--coordinator:#3a3a40;
+  --good:#16a34a;--goodbg:#e9f7ee;--bad:#dc2626;--badbg:#fdecec;--warn:#b45309;--warnbg:#fdf3e1;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",Roboto,sans-serif;
+  --shadow:0 1px 2px rgba(0,0,0,.04),0 4px 16px rgba(0,0,0,.04);
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#141416;--panel:#1c1c1f;--panel2:#202024;--ink:#ececee;--ink2:#b9b9c0;--muted:#8a8a92;--line:#2e2e33;--line2:#26262a;
+  --logical:#4b93ea;--creative:#f07d4c;--skeptical:#a07cf8;--empathetic:#2cc28b;--coordinator:#d4d4d8;
+  --goodbg:#11291b;--badbg:#311616;--warnbg:#2f2410;--good:#34d399;--bad:#f87171;--warn:#fbbf24;
+  --shadow:none;
+}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--sans)}
+button{font:inherit;color:inherit}
+header{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.bar{display:flex;align-items:center;gap:14px;padding:10px 20px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:9px;font-weight:650;letter-spacing:-.01em;font-size:15px}
+.brand svg{width:26px;height:26px}
+select,input[type=text],input[type=search]{font:inherit;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:6px 10px}
+.status{display:flex;gap:8px;align-items:center;flex-wrap:wrap;color:var(--ink2);font-size:13px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;background:var(--panel);border:1px solid var(--line);font-size:12.5px;white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.dot.live{background:var(--good);box-shadow:0 0 0 0 var(--good);animation:pulse 1.6s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--good) 60%,transparent)}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
+nav{display:flex;gap:2px;padding:0 16px}
+nav button{background:none;border:0;padding:9px 14px;border-bottom:2px solid transparent;color:var(--ink2);cursor:pointer;font-weight:520}
+nav button.on{color:var(--ink);border-color:var(--ink)}
+main{padding:18px 20px 60px;max-width:1680px;margin:0 auto}
+.view{display:none}.view.on{display:block}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+.muted{color:var(--muted)}.small{font-size:12.5px}.mono{font-family:var(--mono)}
+.chip{display:inline-flex;align-items:center;gap:5px;font:600 12px/1 var(--mono);padding:4px 8px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}
+.chip.good{background:var(--goodbg);border-color:color-mix(in srgb,var(--good) 35%,transparent);color:var(--good)}
+.chip.bad{background:var(--badbg);border-color:color-mix(in srgb,var(--bad) 35%,transparent);color:var(--bad)}
+.chip.none{color:var(--muted);font-weight:500}
+.tag{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;padding:2px 7px;border-radius:5px;background:var(--panel2);border:1px solid var(--line);color:var(--ink2)}
+.seg{display:inline-flex;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:2px;gap:2px}
+.seg button{border:0;background:none;padding:4px 11px;border-radius:7px;cursor:pointer;color:var(--ink2);font-size:13px}
+.seg button.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.spacer{flex:1}
+h2{font-size:15px;margin:0 0 10px;font-weight:650;letter-spacing:-.01em}
+h3{font-size:13px;margin:0 0 8px;font-weight:650;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em}
+
+/* brain view */
+.brainwrap{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:16px;align-items:start}
+.taskcard{padding:16px 18px;margin-bottom:14px}
+.taskhead{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.prompt{white-space:pre-wrap;font-size:14.5px;line-height:1.55;max-height:220px;overflow:auto}
+.choices{margin:10px 0 0;padding:0;list-style:none;display:grid;gap:4px}
+.choices li{display:flex;gap:8px;padding:5px 8px;border-radius:7px;background:var(--panel2)}
+.choices li b{font-family:var(--mono);color:var(--ink2)}
+.choices li.gold{outline:1px dashed color-mix(in srgb,var(--good) 60%,transparent)}
+.controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 12px}
+.brain{position:relative;display:grid;grid-template-columns:1fr 1.08fr 1fr;grid-template-areas:"logical coordinator creative" "skeptical coordinator empathetic";gap:16px}
+.brain svg.wires{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0}
+.region{position:relative;z-index:1;display:flex;flex-direction:column;min-height:300px;background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
+.region::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:var(--c)}
+.region.coordinator{grid-area:coordinator;min-height:620px}
+.rhead{display:flex;align-items:center;gap:8px;padding:12px 14px 8px}
+.rname{font-weight:650;color:var(--c);font-size:14px}
+.rmodel{font:11px var(--mono);color:var(--muted)}
+.rstate{margin-left:auto;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.rstate .spin{width:10px;height:10px;border-radius:50%;border:2px solid color-mix(in srgb,var(--c) 30%,transparent);border-top-color:var(--c);animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.answers{display:flex;align-items:center;gap:6px;padding:0 14px 8px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.rtabs{display:flex;gap:2px;padding:0 10px;border-bottom:1px solid var(--line2)}
+.rtabs button{background:none;border:0;padding:6px 8px;font-size:12.5px;color:var(--muted);border-bottom:2px solid transparent;cursor:pointer}
+.rtabs button.on{color:var(--ink);border-color:var(--c)}
+.rtabs button:disabled{opacity:.4;cursor:default}
+.rbody{flex:1;overflow:auto;padding:10px 14px 14px;white-space:pre-wrap;font-size:13px;line-height:1.5;max-height:340px;word-break:break-word}
+.region.coordinator .rbody{max-height:none}
+.rbody.empty{color:var(--muted);font-style:italic}
+.caret::after{content:"▍";color:var(--c);animation:blink 1s steps(2) infinite;margin-left:1px}
+@keyframes blink{50%{opacity:0}}
+.rfoot{display:flex;gap:8px;padding:8px 12px;border-top:1px solid var(--line2);font-size:12px;color:var(--muted);align-items:center}
+.linkbtn{background:none;border:0;color:var(--ink2);cursor:pointer;padding:0;text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:3px;font-size:12px}
+.verdict{margin:0 14px 12px;padding:10px 12px;border-radius:10px;font-weight:600;display:flex;gap:8px;align-items:center}
+.verdict.good{background:var(--goodbg);color:var(--good)}
+.verdict.bad{background:var(--badbg);color:var(--bad)}
+.verdict.wait{background:var(--panel2);color:var(--muted);font-weight:500}
+.exampletable{margin:0 14px 10px;font-size:12px;border-collapse:collapse;width:calc(100% - 28px)}
+.exampletable td{padding:3px 6px;border-bottom:1px solid var(--line2)}
+.side{display:grid;gap:14px;position:sticky;top:110px}
+.side .card{padding:14px 16px}
+.cand{display:grid;grid-template-columns:1fr 110px 44px;gap:8px;align-items:center;font-size:12.5px;padding:4px 0}
+.simbar{position:relative;height:8px;border-radius:4px;background:var(--line2);overflow:visible}
+.simbar i{position:absolute;inset:0 auto 0 0;border-radius:4px;background:var(--muted)}
+.simbar i.kept{background:var(--logical)}
+.simbar b{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--bad);border-radius:1px}
+.conf{display:inline-block;width:48px;height:5px;border-radius:3px;background:var(--line2);vertical-align:middle;margin-right:6px;overflow:hidden}
+.conf i{display:block;height:100%;background:var(--empathetic)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:12.5px}
+.kv dt{color:var(--muted)}.kv dd{margin:0}
+.empty-state{padding:40px;text-align:center;color:var(--muted)}
+
+/* tables */
+table.t{width:100%;border-collapse:collapse;font-size:13px}
+table.t th{text-align:left;font-weight:600;color:var(--muted);font-size:12px;padding:8px 10px;border-bottom:1px solid var(--line)}
+table.t td{padding:8px 10px;border-bottom:1px solid var(--line2);vertical-align:top}
+table.t tr.click{cursor:pointer}
+table.t tr.click:hover td{background:var(--panel2)}
+.ok{color:var(--good);font-weight:600}.no{color:var(--bad);font-weight:600}
+
+/* memory */
+.grid2{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:16px;align-items:start}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+.tile{padding:14px 16px}
+.tile .v{font-size:24px;font-weight:650;letter-spacing:-.02em;margin-top:4px}
+.tile .l{font-size:12px;color:var(--muted)}
+.episode{border-bottom:1px solid var(--line2);padding:10px 0}
+.episode summary{cursor:pointer;display:flex;gap:8px;align-items:center;flex-wrap:wrap;list-style:none}
+.episode summary::-webkit-details-marker{display:none}
+.episode pre,.pre{white-space:pre-wrap;font:12.5px/1.5 var(--mono);background:var(--panel2);border:1px solid var(--line2);border-radius:8px;padding:10px;margin:8px 0 0;max-height:360px;overflow:auto}
+.note{font-size:12.5px;background:var(--warnbg);color:var(--warn);border-radius:7px;padding:6px 9px;margin-top:6px}
+.section{padding:16px 18px;margin-bottom:16px}
+.scroll{max-height:620px;overflow:auto}
+
+/* sleep */
+.pairgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.pairgrid .pre{max-height:300px}
+.heat td.cell{text-align:center;font:12px var(--mono);border-radius:4px}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--ink2)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+
+/* health */
+.checks{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.check{padding:14px 16px;border-left:4px solid var(--line)}
+.check.pass{border-left-color:var(--good)}.check.fail{border-left-color:var(--bad)}.check.warn{border-left-color:var(--warn)}.check.wait{border-left-color:var(--line)}
+.check .v{font-size:22px;font-weight:650;margin:4px 0}
+.check .why{font-size:12.5px;color:var(--ink2)}
+.badge{font-size:11px;font-weight:700;padding:2px 7px;border-radius:5px;text-transform:uppercase;letter-spacing:.04em}
+.badge.pass{background:var(--goodbg);color:var(--good)}.badge.fail{background:var(--badbg);color:var(--bad)}.badge.warn{background:var(--warnbg);color:var(--warn)}.badge.wait{background:var(--panel2);color:var(--muted)}
+
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--panel);color:var(--ink);max-width:min(900px,94vw);width:900px;padding:0}
+dialog::backdrop{background:rgba(0,0,0,.35)}
+dialog .dh{display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
+dialog .db{padding:12px 16px;max-height:75vh;overflow:auto}
+.msg{margin-bottom:12px}.msg .who{font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:4px}
+
+@media (max-width:1180px){
+  .brainwrap{grid-template-columns:1fr}
+  .side{position:static}
+  .grid2{grid-template-columns:1fr}
+}
+@media (max-width:820px){
+  .brain{grid-template-columns:1fr;grid-template-areas:"coordinator" "logical" "creative" "skeptical" "empathetic"}
+  .region.coordinator{min-height:300px}
+  .brain svg.wires{display:none}
+  main{padding:14px 16px 50px}
+  .pairgrid{grid-template-columns:1fr}
+  .bar{padding:10px 16px}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 5.5a4 4 0 0 0-6.5 3.2A4.5 4.5 0 0 0 4 16a4.5 4.5 0 0 0 2.5 6.8A4.5 4.5 0 0 0 12 26.5c1.7 0 3-.9 4-2V7.6c-1-1.3-2.4-2.1-4-2.1Z"/><path d="M20 5.5a4 4 0 0 1 6.5 3.2A4.5 4.5 0 0 1 28 16a4.5 4.5 0 0 1-2.5 6.8A4.5 4.5 0 0 1 20 26.5c-1.7 0-3-.9-4-2V7.6c1-1.3 2.4-2.1 4-2.1Z"/><circle cx="16" cy="16" r="2.2" fill="currentColor"/></svg>
+      CogArch Live
+    </div>
+    <select id="runSelect" aria-label="Run"></select>
+    <div class="status" id="status"></div>
+    <div class="spacer"></div>
+    <span class="pill"><span class="dot" id="liveDot"></span><span id="liveText">connecting</span></span>
+  </div>
+  <nav id="nav">
+    <button data-view="brain" class="on">Brain</button>
+    <button data-view="tasks">Problems</button>
+    <button data-view="memory">Memory</button>
+    <button data-view="sleep">Sleep</button>
+    <button data-view="health">Health</button>
+  </nav>
+</header>
+<main>
+  <section class="view on" id="view-brain"></section>
+  <section class="view" id="view-tasks"></section>
+  <section class="view" id="view-memory"></section>
+  <section class="view" id="view-sleep"></section>
+  <section class="view" id="view-health"></section>
+</main>
+<dialog id="modal"><div class="dh"><b id="modalTitle"></b><div class="spacer"></div><button class="linkbtn" id="modalClose">Close</button></div><div class="db" id="modalBody"></div></dialog>
+
+<script>
+const SPECIALISTS = ["logical","creative","skeptical","empathetic"];
+const LABEL = {logical:"Logical",creative:"Creative",skeptical:"Skeptical",empathetic:"Empathetic",coordinator:"Coordinator"};
+const ROLE_NOTE = {logical:"step-by-step analysis",creative:"other framings",skeptical:"traps and edge cases",empathetic:"people and intent",coordinator:"weighs the team, decides"};
+const $ = (s, el=document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pct = (x, d=0) => x == null || isNaN(x) ? "–" : (100*x).toFixed(d) + "%";
+const short = (s, n=60) => { s = String(s ?? ""); return s.length > n ? s.slice(0, n-1) + "…" : s; };
+
+let S, source, view = "brain";
+const ui = {task: null, agent: null, attempt: null, follow: true, tab: {}, showGold: false, memAgent: null, sleepCycle: null, sleepAgent: null, pairRole: null, memDomain: "", memSearch: null, memData: null, taskFilter: ""};
+
+function fresh() {
+  return {run: null, phase: null, progress: null, tasks: new Map(), order: [], calls: new Map(), recalls: [], writes: [], reflections: [], credit: [], pairs: [], rationalize: [], train: new Map(), adapters: [], validation: [], rollbacks: [], benchmarks: [], first: null, last: null};
+}
+
+function taskAgent(taskId, agent) {
+  const t = S.tasks.get(taskId);
+  if (!t) return null;
+  if (!t.agents[agent]) t.agents[agent] = {recall: null, attempts: [], known: null, credit: null, write: null};
+  return t.agents[agent];
+}
+function attemptOf(ta, n) {
+  while (ta.attempts.length < n) ta.attempts.push({calls: {}, rounds: {}, decide: null, decision: null, verdict: null});
+  return ta.attempts[n-1];
+}
+
+function apply(e) {
+  if (!S.first) S.first = e.t;
+  S.last = e.t;
+  switch (e.type) {
+    case "run_start": S.run = e; break;
+    case "phase": S.phase = e; break;
+    case "progress": S.progress = e; break;
+    case "measure_start": S.measure = {done: 0, total: e.total}; break;
+    case "measure_progress": if (S.measure) S.measure.done = e.done; break;
+    case "task":
+      S.tasks.set(e.task.task_id, {task: e.task, cycle: e.cycle, index: S.order.length, t: e.t, agents: {}});
+      S.order.push(e.task.task_id);
+      if (ui.follow) { ui.task = e.task.task_id; ui.attempt = null; }
+      break;
+    case "recall": {
+      S.recalls.push(e);
+      const ta = taskAgent(e.task_id, e.agent); if (ta) ta.recall = e; break;
+    }
+    case "call_start": {
+      S.calls.set(e.call, {meta: e, text: "", done: false});
+      const ta = taskAgent(e.task_id, e.agent); if (!ta) break;
+      const at = attemptOf(ta, e.attempt);
+      if (e.stage === "decide") at.decide = e.call;
+      else { (at.calls[e.role] ||= {})[e.stage] = e.call; }
+      break;
+    }
+    case "delta": { const c = S.calls.get(e.call); if (c) { c.text += e.text; deltaQueue.add(e.call); } return; }
+    case "call_end": { const c = S.calls.get(e.call); if (c) { c.text = e.response; c.done = true; c.seconds = e.seconds; deltaQueue.add(e.call); } break; }
+    case "round": { const ta = taskAgent(e.task_id, e.agent); if (ta) { const at = attemptOf(ta, e.attempt); at.rounds[e.round] = e.answers; (at.evidence ||= {})[e.round] = e.evidence; } break; }
+    case "decision": { const ta = taskAgent(e.task_id, e.agent); if (ta) attemptOf(ta, e.attempt).decision = e; break; }
+    case "verdict": { const ta = taskAgent(e.task_id, e.agent); if (ta) attemptOf(ta, e.attempt).verdict = e; break; }
+    case "known": { const ta = taskAgent(e.task_id, e.agent); if (ta) ta.known = e; break; }
+    case "credit": { const ta = taskAgent(e.task_id, e.agent); if (ta) ta.credit = e; break; }
+    case "memory_write": { S.writes.push(e); const ta = taskAgent(e.task_id, e.agent); if (ta) ta.write = e; break; }
+    case "reflection": S.reflections.push(e); break;
+    case "credit_rules": S.credit.push(e); break;
+    case "pairs": S.pairs.push(e); break;
+    case "rationalize": S.rationalize.push(e); break;
+    case "training": break;
+    case "train_progress": { if (!S.train.has(e.job + "#" + e.cycle)) S.train.set(e.job + "#" + e.cycle, {job: e.job, cycle: e.cycle, log: []}); S.train.get(e.job + "#" + e.cycle).log.push(e); break; }
+    case "adapter": S.adapters.push(e); break;
+    case "validation_done": S.validation.push({cycle: S.phase ? S.phase.cycle : 0, ...e}); break;
+    case "rollback": S.rollbacks.push(e); break;
+    case "benchmark": S.benchmarks.push(e); break;
+  }
+  dirty = true;
+}
+
+let dirty = false; const deltaQueue = new Set();
+function loop() {
+  if (dirty) { dirty = false; deltaQueue.clear(); render(); }
+  else if (deltaQueue.size) { for (const id of deltaQueue) paintCall(id); deltaQueue.clear(); }
+  setTimeout(() => requestAnimationFrame(loop), 120);
+}
+
+function connect(run) {
+  if (source) source.close();
+  S = fresh(); ui.task = null; ui.agent = null; ui.attempt = null; ui.follow = true; ui.memData = null; ui.memSearch = null;
+  render();
+  source = new EventSource("/api/events?run=" + encodeURIComponent(run));
+  source.onopen = () => setLive(true);
+  source.onerror = () => setLive(false);
+  source.onmessage = m => { for (const line of m.data.split("\n")) if (line) apply(JSON.parse(line)); };
+}
+function setLive(on) { $("#liveDot").className = "dot" + (on ? " live" : ""); $("#liveText").textContent = on ? "live" : "reconnecting"; }
+
+async function loadRuns() {
+  const runs = await (await fetch("/api/runs")).json();
+  const sel = $("#runSelect");
+  const want = new URLSearchParams(location.search).get("run") || (runs[0] && runs[0].name);
+  sel.innerHTML = runs.map(r => `<option ${r.name === want ? "selected" : ""}>${esc(r.name)}</option>`).join("");
+  sel.onchange = () => { history.replaceState(null, "", "?run=" + encodeURIComponent(sel.value)); connect(sel.value); };
+  if (want) connect(want); else $("#view-brain").innerHTML = `<div class="empty-state">No runs with an event log yet.</div>`;
+}
+
+$("#nav").onclick = ev => {
+  const b = ev.target.closest("button"); if (!b) return;
+  view = b.dataset.view;
+  for (const x of $("#nav").children) x.classList.toggle("on", x === b);
+  for (const v of document.querySelectorAll(".view")) v.classList.toggle("on", v.id === "view-" + view);
+  if (view === "memory") ui.memData = null;
+  render();
+};
+$("#modalClose").onclick = () => $("#modal").close();
+function modal(title, html) { $("#modalTitle").textContent = title; $("#modalBody").innerHTML = html; $("#modal").showModal(); }
+
+function render() {
+  if (!S) return;
+  renderStatus();
+  if (view === "brain") renderBrain();
+  else if (view === "tasks") renderTasks();
+  else if (view === "memory") renderMemory();
+  else if (view === "sleep") renderSleep();
+  else if (view === "health") renderHealth();
+}
+
+const PHASE = {validate: "Validating", wake: "Awake: solving problems", reflect: "Sleep: reflecting", train: "Sleep: training", benchmarks: "Benchmarks", done: "Finished"};
+function renderStatus() {
+  const p = S.phase, r = S.run, g = S.progress;
+  const parts = [];
+  if (p) parts.push(`<span class="pill"><b>${esc(PHASE[p.phase] || p.phase)}</b></span>`);
+  if (r && p) parts.push(`<span class="pill">${p.cycle ? `Cycle ${p.cycle} of ${r.cycles}` : "Before training"}</span>`);
+  if (g && p && p.phase === "wake" && g.cycle === p.cycle) parts.push(`<span class="pill">${g.done} / ${g.total} problems</span>`);
+  if (p && p.phase === "validate" && S.measure) parts.push(`<span class="pill">${S.measure.done} / ${S.measure.total} validation answers</span>`);
+  if (r) parts.push(`<span class="pill">${esc(r.config.model.base.split("/").pop())}</span>`);
+  $("#status").innerHTML = parts.join("");
+}
+
+/* ───────────── Brain ───────────── */
+function currentTask() { return ui.task && S.tasks.get(ui.task); }
+function correctMark(ta, attempt, round, spec) {
+  if (!ta || !ta.credit) return "";
+  const v = ta.credit.correct[`${attempt}:${round}:${spec}`];
+  return v === true ? "good" : v === false ? "bad" : "";
+}
+function answerChip(ans, cls) {
+  if (ans === undefined) return `<span class="chip none">…</span>`;
+  if (!ans) return `<span class="chip bad" title="No answer could be read from this reply">no answer</span>`;
+  const lines = String(ans).split("\n");
+  const one = lines.length > 2 ? `code · ${lines.length} lines` : lines[0];
+  return `<span class="chip ${cls}" title="${esc(ans)}">${esc(short(one, 28))}</span>`;
+}
+
+function renderBrain() {
+  const root = $("#view-brain");
+  const t = currentTask();
+  if (!t) {
+    const p = S.phase;
+    root.innerHTML = `<div class="card empty-state">${S.run ? (p && p.phase === "validate" ? `Measuring the untrained team on validation problems (the whole team, and each specialist with and without its persona)${S.measure ? `: ${S.measure.done} of ${S.measure.total} answers` : ""}. The brain view starts with the first training problem.` : "Waiting for the first problem…") : "Loading the run…"}</div>`;
+    return;
+  }
+  const agents = S.run ? S.run.agents : Object.keys(t.agents);
+  if (!ui.agent || !agents.includes(ui.agent)) ui.agent = agents[0];
+  const ta = t.agents[ui.agent] || {attempts: []};
+  const nAttempts = ta.attempts.length;
+  const attempt = ui.attempt && ui.attempt <= nAttempts ? ui.attempt : Math.max(1, nAttempts);
+  const at = ta.attempts[attempt-1] || {calls: {}, rounds: {}};
+  const scroll = {};
+  for (const el of root.querySelectorAll(".rbody")) scroll[el.dataset.key] = [el.scrollTop, el.scrollHeight - el.scrollTop - el.clientHeight < 30];
+
+  const task = t.task;
+  const goldLetter = task.kind === "choice" ? task.answer : null;
+  const choices = task.choices && task.choices.length ? `<ul class="choices">${task.choices.map((c,i) => { const L = "ABCDEFGHIJ"[i]; return `<li class="${ui.showGold && L === goldLetter ? "gold" : ""}"><b>${L}</b><span>${esc(c)}</span></li>`; }).join("")}</ul>` : "";
+  const gold = ui.showGold ? (task.kind === "code" ? `<span class="muted small">hidden tests stay with the environment</span>` : `<span class="chip good">${esc(task.answer)}</span>`) : "";
+  const idx = t.index;
+
+  root.innerHTML = `
+  <div class="brainwrap">
+    <div>
+      <div class="card taskcard">
+        <div class="taskhead">
+          <span class="tag">${esc(task.domain)}</span>
+          <span class="mono small muted">${esc(task.task_id)}</span>
+          <span class="muted small">· cycle ${t.cycle} · problem ${idx+1} of ${S.order.length}</span>
+          <div class="spacer"></div>
+          <button class="linkbtn" id="prevTask" ${idx === 0 ? "disabled" : ""}>← previous</button>
+          <button class="linkbtn" id="nextTask" ${idx >= S.order.length-1 ? "disabled" : ""}>next →</button>
+          <label class="small muted"><input type="checkbox" id="follow" ${ui.follow ? "checked" : ""}> follow live</label>
+        </div>
+        <div class="prompt">${esc(task.prompt)}</div>
+        ${choices}
+        ${task.examples && task.examples.length ? `<div class="small muted" style="margin-top:8px">Shown example: <span class="mono">${esc(task.examples.join("  ·  "))}</span></div>` : ""}
+        <div class="row" style="margin-top:10px"><button class="linkbtn" id="toggleGold">${ui.showGold ? "Hide" : "Show"} the correct answer (never shown to the agents)</button>${gold}</div>
+      </div>
+      <div class="controls">
+        <div class="seg" id="agentSeg">${agents.map(a => { const x = t.agents[a]; const solved = x && x.attempts.some(y => y.verdict && y.verdict.passed); const failed = x && x.attempts.length && x.attempts.every(y => y.verdict && !y.verdict.passed); return `<button data-a="${a}" class="${a === ui.agent ? "on" : ""}">Agent ${esc(a)} ${solved ? '<span class="ok">✓</span>' : failed ? '<span class="no">✗</span>' : ""}</button>`; }).join("")}</div>
+        <div class="seg" id="attemptSeg">${Array.from({length: Math.max(1, nAttempts)}, (_, i) => { const v = ta.attempts[i] && ta.attempts[i].verdict; return `<button data-n="${i+1}" class="${i+1 === attempt ? "on" : ""}">Attempt ${i+1} ${v ? (v.passed ? '<span class="ok">✓</span>' : '<span class="no">✗</span>') : ""}</button>`; }).join("")}</div>
+        <span class="muted small">${task.kind === "choice" ? "Multiple choice gets one attempt, so “wrong” cannot be used to rule options out." : "After “wrong”, the whole team tries again."}</span>
+      </div>
+      <div class="brain" id="brain">
+        <svg class="wires" id="wires"></svg>
+        ${SPECIALISTS.map(s => regionHTML(s, ta, at, attempt)).join("")}
+        ${coordinatorHTML(ta, at, attempt, task)}
+      </div>
+    </div>
+    <div class="side">${sideHTML(t, ta)}</div>
+  </div>`;
+
+  for (const el of root.querySelectorAll(".rbody")) {
+    const s = scroll[el.dataset.key];
+    if (s && !s[1]) el.scrollTop = s[0]; else el.scrollTop = el.scrollHeight;
+  }
+  $("#follow").onchange = e => { ui.follow = e.target.checked; if (ui.follow) { ui.task = S.order[S.order.length-1]; ui.attempt = null; } render(); };
+  $("#toggleGold").onclick = () => { ui.showGold = !ui.showGold; render(); };
+  $("#prevTask").onclick = () => { ui.follow = false; ui.task = S.order[idx-1]; ui.attempt = null; render(); };
+  $("#nextTask").onclick = () => { ui.follow = false; ui.task = S.order[idx+1]; ui.attempt = null; render(); };
+  $("#agentSeg").onclick = e => { const b = e.target.closest("button"); if (b) { ui.agent = b.dataset.a; ui.attempt = null; render(); } };
+  $("#attemptSeg").onclick = e => { const b = e.target.closest("button"); if (b) { ui.attempt = +b.dataset.n; render(); } };
+  for (const b of root.querySelectorAll(".rtabs button")) b.onclick = () => { ui.tab[b.dataset.role] = b.dataset.stage; render(); };
+  for (const b of root.querySelectorAll("[data-prompt]")) b.onclick = () => showPrompt(+b.dataset.prompt);
+  for (const b of root.querySelectorAll("[data-memtext]")) b.onclick = () => modal("What memory put in front of the team", `<pre class="pre">${esc(ta.recall.text || "(nothing)")}</pre>`);
+  drawWires();
+}
+
+function stageShown(role, at) {
+  const c = at.calls[role] || {};
+  const pick = ui.tab[role];
+  if (pick && c[pick]) return pick;
+  return c.round2 ? "round2" : "round1";
+}
+function regionHTML(role, ta, at, attempt) {
+  const c = at.calls[role] || {};
+  const stage = stageShown(role, at);
+  const id = c[stage];
+  const call = id && S.calls.get(id);
+  const r1 = at.rounds[1] && at.rounds[1][role], r2 = at.rounds[2] && at.rounds[2][role];
+  const isCode = currentTask().task.kind === "code";
+  const m1 = correctMark(ta, attempt, 1, role), m2 = correctMark(ta, attempt, 2, role);
+  const changed = c.round2 && r1 !== undefined && r2 !== undefined && (isCode ? m1 && m2 && m1 !== m2 : String(r1).trim() !== String(r2).trim());
+  const streaming = call && !call.done;
+  const model = call ? call.meta.model : null;
+  const adapter = model && S.run && model !== S.run.config.model.served_name ? "trained adapter" : "base weights";
+  const chosenHere = at.decision && at.decision.chosen === role;
+  return `<div class="region" style="--c:var(--${role});grid-area:${role};${chosenHere ? "box-shadow:0 0 0 2px var(--" + role + ");" : ""}" data-region="${role}">
+    <div class="rhead"><span class="rname">${LABEL[role]}</span><span class="rmodel">${ROLE_NOTE[role]}</span>${chosenHere ? '<span class="tag" style="color:var(--' + role + ')">submitted</span>' : ""}
+      <span class="rstate">${streaming ? `<span class="spin"></span>${stage === "round2" ? "discussing" : "thinking"}` : call ? `${call.seconds ?? ""}s` : "waiting"}</span></div>
+    <div class="answers">Alone ${answerChip(r1, correctMark(ta, attempt, 1, role))} <span>→</span> after discussion ${answerChip(r2, correctMark(ta, attempt, 2, role))} ${changed ? '<span class="tag" style="color:var(--warn)">changed its mind</span>' : ""}</div>
+    <div class="rtabs"><button data-role="${role}" data-stage="round1" class="${stage === "round1" ? "on" : ""}" ${c.round1 ? "" : "disabled"}>Alone</button><button data-role="${role}" data-stage="round2" class="${stage === "round2" ? "on" : ""}" ${c.round2 ? "" : "disabled"}>Discussion</button></div>
+    <div class="rbody ${call ? (streaming ? "caret" : "") : "empty"}" data-key="${role}" ${id ? `data-call="${id}"` : ""}>${call ? (call.text ? esc(call.text) : '<span class="muted">Queued for the model…</span>') : "Not started."}</div>
+    <div class="rfoot"><span>${adapter}</span><span>·</span><span>T ${call ? call.meta.temperature : "–"}</span><div class="spacer"></div>${id ? `<button class="linkbtn" data-prompt="${id}">what it was asked</button>` : ""}</div>
+  </div>`;
+}
+function coordinatorHTML(ta, at, attempt, task) {
+  const id = at.decide, call = id && S.calls.get(id);
+  const d = at.decision, v = at.verdict;
+  const streaming = call && !call.done;
+  const ev = (d && d.evidence) || (at.evidence && (at.evidence[2] || at.evidence[1]));
+  let ex = "";
+  if (ev) {
+    const rows = SPECIALISTS.map(k => {
+      const exm = ev.examples && ev.examples[k];
+      const group = (ev.groups || []).find(g => g.includes(k)) || [k];
+      const same = group.filter(x => x !== k).map(x => LABEL[x]).join(", ");
+      return `<tr><td style="color:var(--${k});font-weight:600">${LABEL[k]}${d && d.chosen === k ? " ★" : ""}</td><td>${answerChip(ev.answers[k], "")}</td>${task.kind === "code" ? `<td class="${exm && exm[0] === exm[1] ? "ok" : "no"}">${exm ? `${exm[0]}/${exm[1]} examples` : "–"}</td>` : ""}<td class="small muted">${same ? `same as ${same}` : "alone"}</td></tr>`;
+    }).join("");
+    ex = `<div class="small muted" style="margin:0 14px 4px">Checked without a model${task.kind === "code" ? ": shown examples run, behaviour compared on the team's own test inputs" : ": answers grouped by agreement"}</div><table class="exampletable">${rows}</table>`;
+  }
+  const how = d ? ({agreement: "All specialists agreed, so no discussion and no choice were needed.", coordinator: `The coordinator chose ${LABEL[d.chosen]}.`, fallback: `The coordinator named no valid position; the largest group (${LABEL[d.chosen]}) was submitted.`}[d.chosen_by] + (d.discussed ? " They disagreed at first, so they discussed." : "")) : "";
+  const verdict = v ? (v.passed ? `<div class="verdict good">✓ Accepted by the world${task.kind === "code" ? ` · ${v.tests_passed}/${v.tests_total} hidden tests` : ""}</div>` : `<div class="verdict bad">✗ Told: “${esc(v.feedback || "wrong")}”${attempt < (task.max_attempts || 3) && task.kind !== "choice" ? " · tries again" : ""}</div>`) : `<div class="verdict wait">${call ? (streaming ? "Deciding…" : "Submitting…") : "Waiting for the specialists"}</div>`;
+  const model = call ? call.meta.model : null;
+  return `<div class="region coordinator" style="--c:var(--coordinator)" data-region="coordinator">
+    <div class="rhead"><span class="rname">Coordinator</span><span class="rmodel">${ROLE_NOTE.coordinator}</span><span class="rstate">${streaming ? '<span class="spin"></span>deciding' : call ? `${call.seconds ?? ""}s` : "waiting"}</span></div>
+    <div class="answers">Submitted ${answerChip(d ? d.answer : undefined, v ? (v.passed ? "good" : "bad") : "")} ${d ? `<span class="small">from <b style="color:var(--${d.chosen})">${LABEL[d.chosen]}</b></span>` : ""}</div>
+    ${how ? `<div class="small" style="margin:0 14px 8px">${esc(how)}</div>` : ""}
+    ${verdict}${ex}
+    <div class="rbody ${call ? (streaming ? "caret" : "") : "empty"}" data-key="coordinator" ${id ? `data-call="${id}"` : ""}>${call ? esc(call.text) : d && d.chosen_by === "agreement" ? "Not needed: the team agreed." : "Chooses one specialist's position when they disagree. It never writes its own answer."}</div>
+    <div class="rfoot"><span>${model && S.run && model !== S.run.config.model.served_name ? "trained adapter" : "base weights"}</span><div class="spacer"></div>${id ? `<button class="linkbtn" data-prompt="${id}">what it was asked</button>` : ""}</div>
+  </div>`;
+}
+function sideHTML(t, ta) {
+  const rc = ta.recall;
+  let mem;
+  if (!S.run || !S.run.config.memory.enabled) mem = `<div class="muted small">Memory is off in this run.</div>`;
+  else if (!rc) mem = `<div class="muted small">Recalling…</div>`;
+  else {
+    const cands = rc.candidates.length ? rc.candidates.slice(0, 6).map(c => `<div class="cand"><span class="mono small" title="${esc(c.task_id)}">${esc(short(c.task_id, 22))} ${c.solved ? '<span class="ok">✓</span>' : '<span class="no">✗</span>'}</span><span class="simbar"><i class="${c.kept ? "kept" : ""}" style="width:${Math.max(0, c.similarity)*100}%"></i><b style="left:${rc.min_similarity*100}%"></b></span><span class="mono small ${c.kept ? "" : "muted"}">${c.similarity.toFixed(2)}</span></div>`).join("") : `<div class="muted small">No memories stored yet.</div>`;
+    const kept = rc.candidates.filter(c => c.kept).length;
+    mem = `<div class="small" style="margin-bottom:6px">${kept ? `<b>${kept}</b> similar past problem${kept > 1 ? "s" : ""} recalled` : "No past problem close enough"} <span class="muted">· cut-off ${rc.min_similarity.toFixed(3)} (red line)</span></div>${cands}
+      <div style="margin-top:10px"><button class="linkbtn" data-memtext="1">see exactly what memory added to the prompt</button></div>`;
+  }
+  const k = ta.known;
+  let after = `<div class="muted small">Appears once every agent is done.</div>`;
+  if (k) {
+    const src = k.found_by == null ? "Nobody found a correct answer, so nothing is learned from this problem." : k.found_by === ui.agent ? "Its own answer was accepted." : `Agent ${esc(k.found_by)} found the answer and shared it.`;
+    const right = ta.credit ? SPECIALISTS.filter(s => Object.entries(ta.credit.correct).some(([key, v]) => key.split(":")[1] === "1" && key.split(":")[2] === s && v)) : [];
+    after = `<div class="small">${src}</div>
+      ${k.found_by != null ? `<div class="small" style="margin-top:6px">Specialists right on their own: ${right.length ? right.map(s => `<b style="color:var(--${s})">${LABEL[s]}</b>`).join(", ") : "none"}</div>` : ""}
+      ${ta.write ? `<div class="small" style="margin-top:6px">Stored as a new memory (importance ${ta.write.entry.importance}).</div>` : ""}`;
+  }
+  return `<div class="card"><h3>Memory recalled</h3>${mem}</div><div class="card"><h3>What the agent learns</h3>${after}</div>`;
+}
+function paintCall(id) {
+  const el = document.querySelector(`.rbody[data-call="${id}"]`);
+  if (!el) return;
+  const c = S.calls.get(id);
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 30;
+  el.textContent = c.text;
+  el.classList.toggle("caret", !c.done);
+  if (atBottom) el.scrollTop = el.scrollHeight;
+}
+function showPrompt(id) {
+  const c = S.calls.get(id);
+  modal(`${LABEL[c.meta.role] || c.meta.role} · ${c.meta.stage === "round1" ? "alone" : c.meta.stage === "round2" ? "discussion" : c.meta.stage}`, c.meta.messages.map(m => `<div class="msg"><div class="who">${esc(m.role)}</div><pre class="pre">${esc(m.content)}</pre></div>`).join("") + `<div class="msg"><div class="who">reply</div><pre class="pre">${esc(c.text)}</pre></div>`);
+}
+function drawWires() {
+  const brain = $("#brain"), svg = $("#wires");
+  if (!brain || !svg || getComputedStyle(svg).display === "none") return;
+  const box = brain.getBoundingClientRect();
+  const co = brain.querySelector('[data-region="coordinator"]').getBoundingClientRect();
+  const cx = co.left - box.left + co.width/2, cy = co.top - box.top + co.height/2;
+  let lines = "";
+  const t = currentTask(); const ta = t && t.agents[ui.agent];
+  const at = ta && ta.attempts[(ui.attempt || ta.attempts.length) - 1];
+  for (const s of SPECIALISTS) {
+    const r = brain.querySelector(`[data-region="${s}"]`).getBoundingClientRect();
+    const x = r.left - box.left + r.width/2, y = r.top - box.top + r.height/2;
+    const active = at && at.decide && S.calls.get(at.decide) && !S.calls.get(at.decide).done;
+    lines += `<path d="M${x},${y} C${(x+cx)/2},${y} ${(x+cx)/2},${cy} ${cx},${cy}" stroke="var(--${s})" stroke-width="${active ? 2.5 : 1.5}" stroke-dasharray="${active ? "6 6" : "0"}" fill="none" opacity="${active ? .8 : .28}">${active ? '<animate attributeName="stroke-dashoffset" from="24" to="0" dur=".8s" repeatCount="indefinite"/>' : ""}</path>`;
+  }
+  svg.innerHTML = lines;
+}
+window.addEventListener("resize", () => view === "brain" && drawWires());
+
+/* ───────────── Problems ───────────── */
+function renderTasks() {
+  const root = $("#view-tasks");
+  const agents = S.run ? S.run.agents : [];
+  const f = ui.taskFilter;
+  const rows = S.order.slice().reverse().filter(id => !f || S.tasks.get(id).task.domain === f).map(id => {
+    const t = S.tasks.get(id);
+    const cells = agents.map(a => {
+      const x = t.agents[a]; if (!x || !x.attempts.length) return `<td class="muted">…</td>`;
+      const ok = x.attempts.findIndex(y => y.verdict && y.verdict.passed);
+      const k = x.known;
+      return `<td>${ok >= 0 ? `<span class="ok">✓ attempt ${ok+1}</span>` : x.attempts.every(y => y.verdict) ? `<span class="no">✗ ${x.attempts.length}×</span>` : `<span class="muted">working</span>`}${k && k.found_by && k.found_by !== a ? `<div class="small muted">learned from ${esc(k.found_by)}</div>` : ""}</td>`;
+    }).join("");
+    return `<tr class="click" data-id="${esc(id)}"><td>${t.cycle}</td><td><span class="tag">${esc(t.task.domain)}</span></td><td class="mono small">${esc(id)}</td><td>${esc(short(t.task.prompt.replace(/\s+/g, " "), 90))}</td>${cells}</tr>`;
+  }).join("");
+  const domains = [...new Set(S.order.map(id => S.tasks.get(id).task.domain))];
+  root.innerHTML = `<div class="card section"><div class="row" style="margin-bottom:10px"><h2 style="margin:0">Problems solved while awake</h2><div class="spacer"></div><select id="taskFilter"><option value="">all domains</option>${domains.map(d => `<option ${d === f ? "selected" : ""}>${esc(d)}</option>`).join("")}</select></div>
+  ${S.order.length ? `<div class="scroll" style="max-height:none"><table class="t"><thead><tr><th>Cycle</th><th>Domain</th><th>Problem</th><th>Question</th>${agents.map(a => `<th>Agent ${esc(a)}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-state">No problems yet.</div>`}</div>`;
+  $("#taskFilter").onchange = e => { ui.taskFilter = e.target.value; render(); };
+  for (const tr of root.querySelectorAll("tr[data-id]")) tr.onclick = () => { ui.task = tr.dataset.id; ui.follow = false; ui.attempt = null; $('#nav [data-view="brain"]').click(); };
+}
+
+/* ───────────── Memory ───────────── */
+async function fetchMemory(agent) {
+  const run = $("#runSelect").value;
+  ui.memData = {agent, loading: true};
+  const data = await (await fetch(`/api/memory?run=${encodeURIComponent(run)}&agent=${encodeURIComponent(agent)}`)).json();
+  ui.memData = {agent, ...data};
+  if (view === "memory") render();
+}
+function renderMemory() {
+  const root = $("#view-memory");
+  if (!S.run) { root.innerHTML = ""; return; }
+  if (!S.run.config.memory.enabled) { root.innerHTML = `<div class="card empty-state">Memory is switched off in this run (the no-memory control).</div>`; return; }
+  const agents = S.run.agents;
+  if (!ui.memAgent || !agents.includes(ui.memAgent)) ui.memAgent = agents[0];
+  const a = ui.memAgent;
+  if (!ui.memData || ui.memData.agent !== a) { if (!ui.memData || !ui.memData.loading) fetchMemory(a); }
+  const md = ui.memData && !ui.memData.loading ? ui.memData : null;
+  const recalls = S.recalls.filter(r => r.agent === a);
+  const hits = recalls.filter(r => r.candidates.some(c => c.kept));
+  const keptSims = recalls.flatMap(r => r.candidates.filter(c => c.kept).map(c => c.similarity));
+  const cross = recalls.flatMap(r => r.candidates.filter(c => c.kept && c.domain !== r.domain)).length;
+  const writes = S.writes.filter(w => w.agent === a);
+  const thresholds = S.run.config.memory.min_similarity;
+
+  const recallRows = recalls.slice().reverse().slice(0, 150).map((r, i) => {
+    const top = r.candidates.slice(0, 5);
+    return `<tr><td class="small muted">${r.cycle}</td><td><span class="tag">${esc(r.domain)}</span></td><td class="mono small"><a href="#" data-goto="${esc(r.task_id)}">${esc(short(r.task_id, 24))}</a></td><td style="min-width:240px">${top.length ? top.map(c => `<div class="cand" style="grid-template-columns:110px 1fr 40px"><span class="mono small" title="${esc(c.task_id)}">${esc(short(c.task_id, 16))}</span><span class="simbar"><i class="${c.kept ? "kept" : ""}" style="width:${c.similarity*100}%"></i><b style="left:${r.min_similarity*100}%"></b></span><span class="mono small ${c.kept ? "" : "muted"}">${c.similarity.toFixed(2)}</span></div>`).join("") : '<span class="muted small">empty store</span>'}</td><td class="small">${r.candidates.filter(c => c.kept).length} kept</td></tr>`;
+  }).join("");
+
+  const episodes = md ? md.episodes.slice().reverse().map(e => {
+    const m = e.metadata || {};
+    return `<details class="episode"><summary><span class="tag">${esc(m.domain)}</span><span class="mono small">${esc(m.task_id)}</span>${m.solved ? '<span class="ok small">solved</span>' : '<span class="no small">not solved</span>'}${m.learned_from && m.learned_from !== a ? `<span class="small muted">answer from ${esc(m.learned_from)}</span>` : ""}<span class="spacer"></span><span class="small muted">cycle ${m.cycle} · recalled ${e.recall_count}× · importance ${e.importance}</span></summary>${m.what_went_wrong ? `<div class="note">What went wrong: ${esc(m.what_went_wrong)}</div>` : ""}<pre>${esc(e.content)}</pre></details>`;
+  }).join("") : `<div class="muted small">Loading…</div>`;
+
+  const reflections = S.reflections.filter(r => r.agent === a).slice().reverse().map(r => `<details class="episode"><summary><b>Cycle ${r.cycle}</b><span class="muted small">part ${r.chunk} of ${r.chunks} · ${r.cases.length} cases · ${r.annotated.length} notes added</span></summary>${r.annotated.map(n => `<div class="note"><span class="mono">${esc(n.task_id)}</span>: ${esc(n.note)}</div>`).join("")}<pre>${esc(r.response)}</pre></details>`).join("");
+
+  const sr = ui.memSearch;
+  const searchRes = sr ? (sr.loading ? `<div class="muted small">Searching…</div>` : sr.results.length ? sr.results.slice(0, 12).map(e => { const m = e.metadata || {}; const th = sr.min_similarity[m.domain] ?? 1; return `<details class="episode"><summary><span class="mono small">${e.similarity.toFixed(3)}</span><span class="simbar" style="width:120px"><i class="${e.similarity >= th ? "kept" : ""}" style="width:${e.similarity*100}%"></i><b style="left:${th*100}%"></b></span><span class="tag">${esc(m.domain)}</span><span class="mono small">${esc(m.task_id)}</span>${e.similarity >= th ? '<span class="small" style="color:var(--logical)">would be recalled</span>' : '<span class="small muted">below cut-off</span>'}</summary><pre>${esc(e.content)}</pre></details>`; }).join("") : `<div class="muted small">No memories match.</div>`) : "";
+
+  root.innerHTML = `
+  <div class="row" style="margin-bottom:14px"><div class="seg" id="memAgents">${agents.map(x => `<button data-a="${x}" class="${x === a ? "on" : ""}">Agent ${esc(x)}</button>`).join("")}</div><span class="muted small">Episodic memory is searched across every subject by how alike two problems read (bge-small embeddings). General knowledge is learned in the weights during sleep.</span><div class="spacer"></div><button class="linkbtn" id="memRefresh">refresh stored memories</button></div>
+  <div class="tiles">
+    <div class="card tile"><div class="l">Episodes stored</div><div class="v">${md ? md.episodes.length : writes.length}</div></div>
+    <div class="card tile"><div class="l">Recalls</div><div class="v">${recalls.length}</div></div>
+    <div class="card tile"><div class="l">Recalls that found something</div><div class="v">${pct(recalls.length ? hits.length / recalls.length : null)}</div></div>
+    <div class="card tile"><div class="l">Mean similarity when recalled</div><div class="v">${keptSims.length ? (keptSims.reduce((x, y) => x + y, 0) / keptSims.length).toFixed(3) : "–"}</div></div>
+    <div class="card tile"><div class="l">Cross-domain recalls</div><div class="v">${cross}</div></div>
+  </div>
+  <div class="grid2">
+    <div>
+      <div class="card section"><h2>Every recall, newest first</h2><div class="small muted" style="margin-bottom:8px">Bars: similarity of the closest stored problems. Red line: the domain's cut-off (${Object.entries(thresholds).map(([d, v]) => `${d} ${v}`).join(", ")}). Blue bars passed it and went into the prompt.</div>
+        ${recalls.length ? `<div class="scroll"><table class="t"><thead><tr><th>Cycle</th><th>Domain</th><th>Problem</th><th>Closest memories</th><th>Used</th></tr></thead><tbody>${recallRows}</tbody></table></div>` : `<div class="muted small">No recalls yet.</div>`}
+      </div>
+      <div class="card section"><h2>Try a recall</h2><div class="row"><input type="search" id="memQ" placeholder="Paste any problem text" style="flex:1;min-width:200px" value="${esc(sr ? sr.q : "")}"><select id="memDomain"><option value="">all domains</option>${Object.keys(thresholds).map(d => `<option ${d === ui.memDomain ? "selected" : ""}>${d}</option>`).join("")}</select><button class="pill" id="memGo" style="cursor:pointer">Search</button></div><div style="margin-top:10px">${searchRes}</div></div>
+    </div>
+    <div>
+      ${reflections ? `<div class="card section"><h2>Reflections during sleep</h2>${reflections}</div>` : ""}
+      <div class="card section"><h2>Episodes (episodic memory)</h2><div class="scroll">${episodes}</div></div>
+    </div>
+  </div>`;
+  $("#memAgents").onclick = e => { const b = e.target.closest("button"); if (b) { ui.memAgent = b.dataset.a; ui.memSearch = null; render(); } };
+  $("#memRefresh").onclick = () => fetchMemory(a);
+  const go = async () => {
+    const q = $("#memQ").value.trim(); if (!q) return;
+    ui.memDomain = $("#memDomain").value;
+    ui.memSearch = {q, loading: true}; render();
+    const run = $("#runSelect").value;
+    const r = await (await fetch(`/api/memory/search?run=${encodeURIComponent(run)}&agent=${encodeURIComponent(a)}&q=${encodeURIComponent(q)}&domain=${encodeURIComponent(ui.memDomain)}`)).json();
+    ui.memSearch = {q, ...r}; render();
+  };
+  $("#memGo").onclick = go; $("#memQ").onkeydown = e => { if (e.key === "Enter") go(); };
+  for (const l of root.querySelectorAll("[data-goto]")) l.onclick = ev => { ev.preventDefault(); ui.task = l.dataset.goto; ui.follow = false; ui.agent = a; $('#nav [data-view="brain"]').click(); };
+}
+
+/* ───────────── Sleep ───────────── */
+function lineChart(points, key, color, w=300, h=80) {
+  const ys = points.map(p => p[key]).filter(v => typeof v === "number");
+  if (ys.length < 2) return `<div class="muted small">${ys.length ? ys[0].toFixed(3) : "–"}</div>`;
+  const min = Math.min(...ys), max = Math.max(...ys), span = max - min || 1;
+  const pts = ys.map((y, i) => `${(i/(ys.length-1))*(w-8)+4},${h-6-((y-min)/span)*(h-14)}`).join(" ");
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" style="display:block"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/><text x="4" y="10" font-size="10" fill="var(--muted)">${max.toFixed(3)}</text><text x="4" y="${h-1}" font-size="10" fill="var(--muted)">${min.toFixed(3)}</text></svg>`;
+}
+function renderSleep() {
+  const root = $("#view-sleep");
+  if (!S.run) { root.innerHTML = ""; return; }
+  const cycles = [...new Set([...S.credit.map(c => c.cycle), ...S.reflections.map(r => r.cycle)])].sort((x, y) => x - y);
+  if (!cycles.length) { root.innerHTML = `<div class="card empty-state">The first sleep starts after cycle 1's problems.</div>`; return; }
+  if (!ui.sleepCycle || !cycles.includes(ui.sleepCycle)) ui.sleepCycle = cycles[cycles.length-1];
+  const agents = S.run.agents;
+  if (!ui.sleepAgent || !agents.includes(ui.sleepAgent)) ui.sleepAgent = agents[0];
+  const c = ui.sleepCycle, a = ui.sleepAgent;
+  const cr = S.credit.find(x => x.cycle === c && x.agent === a);
+  const pe = S.pairs.find(x => x.cycle === c && x.agent === a);
+  const rat = S.rationalize.filter(x => x.cycle === c && x.agent === a);
+  const domains = S.run.config.data.domains;
+
+  const RESP = {winner: "Right on its own and best record: learns from its own answer", owner: "Nobody was right alone; best record in the domain learns the found answer", blamed: "Coordinator adopted its wrong answer: learns the correct one", anchor: "Was right in a domain it does not own: keeps practising it"};
+  let creditHTML = `<div class="muted small">No credit yet.</div>`;
+  if (cr) {
+    const heat = `<table class="t heat"><thead><tr><th>Running record</th>${domains.map(d => `<th>${d}</th>`).join("")}<th>Learns often?</th></tr></thead><tbody>${SPECIALISTS.map(s => `<tr><td style="color:var(--${s});font-weight:600">${LABEL[s]}</td>${domains.map(d => { const v = cr.records[s][d]; return `<td class="cell" style="background:color-mix(in srgb,var(--${s}) ${v == null ? 0 : Math.round(v*55)}%,transparent)">${v == null ? "–" : v.toFixed(2)}</td>`; }).join("")}<td class="mono small">${pct(cr.win_rate[s])}</td></tr>`).join("")}</tbody></table>`;
+    const counts = {};
+    for (const d of cr.decisions) counts[d.specialist + "|" + d.responsibility] = (counts[d.specialist + "|" + d.responsibility] || 0) + 1;
+    const rows = cr.decisions.map(d => `<tr><td class="mono small">${esc(short(d.task_id, 26))}</td><td><span class="tag">${esc(d.domain)}</span></td><td style="color:var(--${d.specialist});font-weight:600">${LABEL[d.specialist]}</td><td class="small" title="${esc(RESP[d.responsibility])}">${esc(d.responsibility)}${d.surprising ? ' <span class="tag" style="color:var(--warn)">surprise ×2</span>' : ""}</td><td class="small">${esc(d.chosen_from)}</td><td class="small muted">${d.solved_alone.map(s => LABEL[s]).join(", ") || "nobody"}</td></tr>`).join("");
+    creditHTML = `${heat}<div class="legend" style="margin:12px 0">${Object.entries(RESP).map(([k, v]) => `<span><b>${k}</b>: ${v}</span>`).join("")}</div><div class="scroll" style="max-height:360px"><table class="t"><thead><tr><th>Problem</th><th>Domain</th><th>Who learns</th><th>Why</th><th>Preferred answer</th><th>Right alone</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+
+  let pairsHTML = `<div class="muted small">No pairs.</div>`;
+  if (pe) {
+    const roles = Object.keys(pe.pairs);
+    if (!ui.pairRole || !roles.includes(ui.pairRole)) ui.pairRole = roles.find(r => pe.pairs[r].length) || roles[0];
+    const list = pe.pairs[ui.pairRole] || [];
+    const summary = roles.map(r => { const p = pe.pairs[r]; const by = {}; for (const x of p) by[x.chosen_from] = (by[x.chosen_from] || 0) + 1; return `<tr class="click" data-role="${r}"><td style="color:var(--${r});font-weight:600">${LABEL[r]}</td><td>${p.length}</td><td class="small">${Object.entries(by).map(([k, v]) => `${k} ${v}`).join(" · ") || "–"}</td><td class="small mono">${p.length ? (p.reduce((s, x) => s + x.chosen.length, 0) / p.length).toFixed(0) + " / " + (p.reduce((s, x) => s + x.rejected.length, 0) / p.length).toFixed(0) : "–"}</td></tr>`; }).join("");
+    pairsHTML = `<table class="t"><thead><tr><th>Part</th><th>Pairs</th><th>Where the preferred answer came from</th><th>Chars preferred / rejected</th></tr></thead><tbody>${summary}</tbody></table>
+      <h3 style="margin-top:14px">${LABEL[ui.pairRole]}: every pair</h3>
+      <div class="scroll" style="max-height:700px">${list.map(p => `<details class="episode"><summary><span class="tag">${esc(p.domain)}</span><span class="mono small">${esc(p.task_id)}</span><span class="small muted">${esc(p.responsibility || "")} · ${esc(p.chosen_from)} · from ${esc(p.source)}</span></summary><div class="pairgrid"><div><div class="small ok">Preferred</div><pre class="pre">${esc(p.chosen)}</pre></div><div><div class="small no">Rejected</div><pre class="pre">${esc(p.rejected)}</pre></div></div></details>`).join("") || '<div class="muted small">None.</div>'}</div>`;
+  }
+
+  const ratHTML = rat.length ? `<div class="small" style="margin-bottom:8px"><b>${rat.filter(r => r.reached).length}</b> of ${rat.length} reached the accepted answer and replaced it as the preferred reply.</div><div class="scroll" style="max-height:360px">${rat.map(r => `<details class="episode"><summary>${r.reached ? '<span class="ok">✓</span>' : '<span class="no">✗</span>'}<span style="color:var(--${r.role});font-weight:600">${LABEL[r.role]}</span><span class="mono small">${esc(short(r.task_id, 26))}</span><span class="small muted">wanted ${esc(short(r.known_answer, 20))}, reached ${esc(short(r.answer, 20)) || "nothing"}</span></summary><pre>${esc(r.response)}</pre></details>`).join("")}</div>` : `<div class="muted small">No specialist had to learn someone else's answer${S.run.config.training.rationalize ? "" : " (rationalisation is off)"}.</div>`;
+
+  const jobs = [...S.train.values()].filter(j => j.cycle === c && j.job.startsWith(a + "/"));
+  const trainHTML = jobs.length ? `<div class="checks">${jobs.map(j => { const role = j.job.split("/")[1]; const last = j.log[j.log.length-1] || {}; const steps = j.log.filter(x => typeof x.loss === "number"); return `<div class="card check" style="border-left-color:var(--${role})"><div class="row"><b style="color:var(--${role})">${LABEL[role]}</b><div class="spacer"></div><span class="small muted">step ${last.step ?? 0} / ${last.of ?? "?"}</span></div><div class="small muted" style="margin-top:6px">loss</div>${lineChart(steps, "loss", `var(--${role})`)}<div class="small muted">preferred beats rejected (reward accuracy)</div>${lineChart(steps, "rewards/accuracies", "var(--good)")}</div>`; }).join("")}</div>` : `<div class="muted small">${S.run.config.training.enabled ? "No adapters trained yet in this cycle." : "Training is off in this run."}</div>`;
+
+  const v0 = S.validation.find(v => v.cycle === 0), vc = S.validation.find(v => v.cycle === c);
+  const valHTML = v0 ? `<table class="t"><thead><tr><th>Agent</th>${domains.map(d => `<th>${d}</th>`).join("")}</tr></thead><tbody>${agents.map(x => `<tr><td>Agent ${esc(x)}${S.rollbacks.some(r => r.agent === x && r.cycle === c) ? ' <span class="tag" style="color:var(--bad)">rolled back</span>' : ""}</td>${domains.map(d => { const b = v0.whole[x] && v0.whole[x][d], n = vc && vc.whole[x] && vc.whole[x][d]; const diff = n != null && b != null ? n - b : null; return `<td>${pct(b)} → ${pct(n)} ${diff != null ? `<span class="${diff >= 0 ? "ok" : "no"} small">${diff >= 0 ? "+" : ""}${(diff*100).toFixed(0)}</span>` : ""}</td>`; }).join("")}</tr>`).join("")}</tbody></table>` : `<div class="muted small">Validation not measured yet.</div>`;
+
+  root.innerHTML = `<div class="row" style="margin-bottom:14px"><div class="seg" id="sleepCycles">${cycles.map(x => `<button data-c="${x}" class="${x === c ? "on" : ""}">Sleep after cycle ${x}</button>`).join("")}</div><div class="seg" id="sleepAgents">${agents.map(x => `<button data-a="${x}" class="${x === a ? "on" : ""}">Agent ${esc(x)}</button>`).join("")}</div></div>
+  <div class="card section"><h2>1 · Who learns from each problem</h2>${creditHTML}</div>
+  <div class="card section"><h2>2 · Specialists explain answers they did not find</h2>${ratHTML}</div>
+  <div class="card section"><h2>3 · Training pairs</h2>${pairsHTML}</div>
+  <div class="card section"><h2>4 · Fine-tuning</h2>${trainHTML}</div>
+  <div class="card section"><h2>5 · Validation, before training → after this sleep</h2>${valHTML}</div>`;
+  $("#sleepCycles").onclick = e => { const b = e.target.closest("button"); if (b) { ui.sleepCycle = +b.dataset.c; render(); } };
+  $("#sleepAgents").onclick = e => { const b = e.target.closest("button"); if (b) { ui.sleepAgent = b.dataset.a; render(); } };
+  for (const tr of root.querySelectorAll("tr[data-role]")) tr.onclick = () => { ui.pairRole = tr.dataset.role; render(); };
+}
+
+/* ───────────── Health ───────────── */
+function renderHealth() {
+  const root = $("#view-health");
+  if (!S.run) { root.innerHTML = ""; return; }
+  const cfg = S.run.config;
+  const checks = [];
+  const add = (title, value, status, why) => checks.push({title, value, status, why});
+  const rounds = [];
+  for (const id of S.order) for (const [a, ta] of Object.entries(S.tasks.get(id).agents)) for (const at of ta.attempts) rounds.push({a, ta, at, task: S.tasks.get(id).task});
+
+  const parsed = {}, total = {};
+  for (const {at} of rounds) {
+    for (const r of [1, 2]) if (at.rounds[r]) for (const [s, ans] of Object.entries(at.rounds[r])) { total[s] = (total[s] || 0) + 1; parsed[s] = (parsed[s] || 0) + (ans ? 1 : 0); }
+    if (at.decision) { total.coordinator = (total.coordinator || 0) + 1; parsed.coordinator = (parsed.coordinator || 0) + (at.decision.answer ? 1 : 0); }
+  }
+  const worst = Object.keys(total).map(k => [k, parsed[k] / total[k]]).sort((x, y) => x[1] - y[1]);
+  add("Every reply has a readable answer", worst.length ? pct(worst[0][1], 1) + " worst" : "–", !worst.length ? "wait" : worst[0][1] >= .95 ? "pass" : worst[0][1] >= .9 ? "warn" : "fail", worst.length ? worst.map(([k, v]) => `${LABEL[k]} ${pct(v, 1)}`).join(" · ") + ". Unreadable answers count as wrong and corrupt credit." : "Needs a few problems.");
+
+  let changed = 0, compared = 0, fixed = 0, broke = 0;
+  for (const {ta, at} of rounds) if (at.rounds[1] && at.rounds[2]) for (const s of SPECIALISTS) {
+    compared++;
+    if (String(at.rounds[1][s]).trim() !== String(at.rounds[2][s]).trim()) {
+      changed++;
+      const n = ta.attempts.indexOf(at) + 1;
+      const b = ta.credit && ta.credit.correct[`${n}:1:${s}`], c = ta.credit && ta.credit.correct[`${n}:2:${s}`];
+      if (b === false && c === true) fixed++; if (b === true && c === false) broke++;
+    }
+  }
+  const ch = compared ? changed / compared : null;
+  add("Discussion changes minds, but not every mind", pct(ch, 1), ch == null ? "wait" : ch >= .05 && ch <= .45 ? "pass" : "warn", `${changed} of ${compared} answers changed after discussion; ${fixed} went wrong→right and ${broke} right→wrong.`);
+  add("Discussion fixes more than it breaks", compared ? `${fixed} vs ${broke}` : "–", !compared ? "wait" : fixed >= broke ? "pass" : "fail", "Counted where the correct answer became known.");
+
+  const decided = rounds.filter(x => x.at.decision);
+  const by = k => decided.filter(x => x.at.decision.chosen_by === k).length;
+  add("Discussion only when needed", decided.length ? pct(decided.filter(x => x.at.decision.discussed).length / decided.length) + " discussed" : "–", decided.length ? "pass" : "wait", decided.length ? `${by("agreement")} attempts agreed straight away, ${by("coordinator") + by("coordinator_answer")} were chosen by the coordinator (${by("coordinator_answer")} by naming the answer), ${by("fallback")} fell back because the coordinator named no valid position.` : "Needs a few problems.");
+  add("Coordinator names a valid position", decided.length - by("agreement") ? pct(1 - by("fallback") / (decided.length - by("agreement"))) : "–", !(decided.length - by("agreement")) ? "wait" : by("fallback") / (decided.length - by("agreement")) <= .05 ? "pass" : "warn", "When it doesn't, the largest agreeing group is submitted instead.");
+  const codeChosen = decided.filter(x => x.task.kind === "code" && x.at.decision.evidence.examples[x.at.decision.chosen]);
+  const failingChosen = codeChosen.filter(x => { const e = x.at.decision.evidence.examples[x.at.decision.chosen]; return e[0] < e[1] && Object.values(x.at.decision.evidence.examples).some(o => o[0] === o[1]); }).length;
+  add("Chosen code passes the shown examples", codeChosen.length ? `${failingChosen} bad picks` : "–", !codeChosen.length ? "wait" : failingChosen ? "warn" : "pass", "Times the coordinator chose code that fails a shown example while another position passed them all.");
+
+  if (cfg.memory.enabled) {
+    const rc = S.recalls; const hit = rc.filter(r => r.candidates.some(c => c.kept)).length;
+    const cross = rc.flatMap(r => r.candidates.filter(c => c.kept && c.domain !== r.domain)).length;
+    add("Memory only recalls close problems", rc.length ? pct(hit / rc.length) + " of recalls" : "–", !rc.length ? "wait" : cross ? "fail" : "pass", `${hit} of ${rc.length} recalls found a stored problem above the cut-off; ${cross} cross-domain. Expect few hits early and 25–40% once ~100 problems per domain are stored.`);
+    const notes = S.reflections.reduce((n, r) => n + r.annotated.length, 0), cases = S.reflections.reduce((n, r) => n + r.cases.length, 0);
+    add("Sleep explains each failure", cases ? `${notes} / ${cases}` : "–", !cases ? "wait" : notes / cases >= .7 ? "pass" : "warn", "Failures that got a ‘what went wrong’ note attached to their memory.");
+  }
+
+  const allPairs = S.pairs.flatMap(p => Object.entries(p.pairs).filter(([r]) => r !== "coordinator").flatMap(([, v]) => v));
+  if (allPairs.length) {
+    const ratio = allPairs.reduce((s, p) => s + p.chosen.length, 0) / Math.max(1, allPairs.reduce((s, p) => s + p.rejected.length, 0));
+    add("Preferred answers keep their reasoning", ratio.toFixed(2) + "× length", ratio >= .7 ? "pass" : ratio >= .5 ? "warn" : "fail", "Mean length of preferred ÷ rejected replies. Short preferred replies teach the model to stop reasoning (the old run's maths collapse).");
+    const counts = {}; for (const p of S.pairs) for (const [r, v] of Object.entries(p.pairs)) counts[r + "@" + p.agent + "#" + p.cycle] = v.length;
+    const low = Object.entries(counts).filter(([, v]) => v > 0 && v < cfg.training.min_pairs).length;
+    add("Enough pairs to train", `${Object.values(counts).filter(v => v >= cfg.training.min_pairs).length} parts`, low ? "warn" : "pass", `Parts with at least ${cfg.training.min_pairs} pairs train an adapter; ${low} had some but too few.`);
+    const doms = {}; for (const p of allPairs) doms[p.domain] = (doms[p.domain] || 0) + 1;
+    add("Training sees every domain", Object.keys(doms).length + " of " + cfg.data.domains.length, Object.keys(doms).length === cfg.data.domains.length ? "pass" : "warn", Object.entries(doms).map(([d, n]) => `${d} ${n}`).join(" · "));
+  }
+  if (S.rationalize.length) {
+    const ok = S.rationalize.filter(r => r.reached).length / S.rationalize.length;
+    add("Specialists can explain found answers", pct(ok), ok >= .5 ? "pass" : ok >= .3 ? "warn" : "fail", "Share of rationalisations that reached the accepted answer. The rest fall back to the finder's reply.");
+  }
+  const v0 = S.validation.find(v => v.cycle === 0), vl = S.validation.filter(v => v.cycle > 0).pop();
+  if (v0 && vl) {
+    const mean = w => { const xs = Object.values(w).flatMap(d => Object.values(d)); return xs.reduce((s, x) => s + x, 0) / xs.length; };
+    const d = mean(vl.whole) - mean(v0.whole);
+    add("Validation after sleep", (d >= 0 ? "+" : "") + (d*100).toFixed(1) + " points", d >= 0 ? "pass" : d > -cfg.training.rollback_threshold ? "warn" : "fail", `Whole-agent accuracy on held-out training-domain problems, cycle ${vl.cycle} vs untrained.`);
+  }
+  for (const v of S.validation.filter(x => x.specialists_no_persona)) {
+    const costs = [];
+    for (const [a, bySpec] of Object.entries(v.specialists)) for (const [sp, byDom] of Object.entries(bySpec)) for (const [d, acc] of Object.entries(byDom)) {
+      const plain = ((v.specialists_no_persona[a] || {})[sp] || {})[d];
+      if (plain != null) costs.push({a, sp, d, cost: plain - acc});
+    }
+    const bad = costs.filter(c => c.cost > .05).sort((x, y) => y.cost - x.cost);
+    add(`Personas don't cost accuracy (${v.cycle ? "after sleep " + v.cycle : "untrained"})`, bad.length ? `${bad.length} costly` : "none costly", !costs.length ? "wait" : bad.length ? "warn" : "pass", bad.length ? bad.slice(0, 6).map(c => `${c.a}/${LABEL[c.sp]} ${c.d} −${(c.cost*100).toFixed(0)}`).join(" · ") + " points vs the same weights without a persona." : "Every specialist scores within 5 points of the same weights without a persona, in every domain.");
+  }
+  const solvedTasks = S.order.length;
+  if (solvedTasks > 1 && S.first) add("Speed", (solvedTasks / ((S.last - S.first) / 60)).toFixed(1) + " problems/min", "pass", `${solvedTasks} problems in ${((S.last - S.first)/60).toFixed(1)} minutes, including validation and sleep.`);
+
+  root.innerHTML = `<div class="card section"><h2>Pilot checks</h2><div class="small muted">Each check guards against a failure seen in the earlier runs. A pilot passes when none is red.</div></div><div class="checks">${checks.map(c => `<div class="card check ${c.status}"><div class="row"><b>${esc(c.title)}</b><div class="spacer"></div><span class="badge ${c.status}">${c.status === "wait" ? "waiting" : c.status}</span></div><div class="v">${esc(c.value)}</div><div class="why">${esc(c.why)}</div></div>`).join("")}</div>`;
+}
+
+loadRuns();
+loop();
+</script>
+</body>
+</html>

@@ -4,14 +4,16 @@ from src.inference.prompts import (
     coordinator_endorsement,
     coordinator_messages,
     discussion_messages,
+    evidence_text,
     load_coordinator,
     load_specialist,
+    parse_choice,
     parse_probes,
     parse_reflection,
     specialist_messages,
     task_text,
 )
-from src.models.core import Decision, Proposal, Task, Verdict
+from src.models.core import Decision, Evidence, Proposal, Task, Verdict
 
 
 def prop(name: str, text: str) -> Proposal:
@@ -56,8 +58,9 @@ def test_retry_shows_previous_answer_and_wrong(math_task):
         attempt_number=1,
         round1=[],
         round2=[],
-        coordinator_prompt=[],
-        coordinator_output="",
+        chosen="logical",
+        chosen_by="coordinator",
+        submitted="\\boxed{41}",
         answer="41",
         result=Verdict(passed=False, feedback="Your answer is wrong."),
     )
@@ -67,30 +70,73 @@ def test_retry_shows_previous_answer_and_wrong(math_task):
     assert "41" in text and "Your answer is wrong." in text
 
 
-def test_discussion_and_decision_prompts(math_task):
-    own, mates = prop("logical", "I say 36"), [prop("creative", "I say 42")]
-    text = discussion_messages(load_specialist("logical"), math_task, own, mates)[
-        -1
-    ].content
-    assert "I say 36" in text and "### creative\nI say 42" in text
-    decide = coordinator_messages(load_coordinator(), math_task, [own, *mates])[
-        -1
-    ].content
-    assert "### logical" in decide and "### creative" in decide
-
-
-def test_long_replies_are_truncated(math_task):
-    own = prop("logical", "x" * 5000)
-    text = discussion_messages(load_specialist("logical"), math_task, own, [])[
-        -1
-    ].content
-    assert "x" * 1800 + " …" in text and "x" * 1801 not in text
-
-
-def test_endorsement_contains_the_reasoning():
-    assert coordinator_endorsement(prop("skeptical", "\\boxed{42}")).startswith(
-        "skeptical's reasoning holds up"
+def test_discussion_and_choice_prompts(math_task):
+    own = Proposal(
+        specialist="logical", round=1, response="I say \\boxed{36}", answer="36"
     )
+    mate = Proposal(
+        specialist="creative", round=1, response="I say \\boxed{42}", answer="42"
+    )
+    evidence = Evidence(
+        answers={"logical": "36", "creative": "42"}, groups=[["logical"], ["creative"]]
+    )
+    system, user = discussion_messages(
+        load_specialist("logical"), math_task, own, [mate], evidence
+    )
+    text = user.content
+    assert (
+        "I say \\boxed{36}" in text
+        and "### creative\nI say \\boxed{42}\nAnswer: 42" in text
+    )
+    assert "- creative: 42" in text and "DISAGREE <name>" in system.content
+    assert "DISAGREE" not in text
+    choose = coordinator_messages(load_coordinator(), math_task, [own, mate], evidence)[
+        -1
+    ].content
+    assert "### logical" in choose and "FINAL CHOICE: <name>" in choose
+    assert "logical, creative" in choose
+
+
+def test_long_reasoning_shows_its_end(math_task):
+    own = Proposal(
+        specialist="logical", round=1, response="a" * 2000 + "z" * 900, answer="1"
+    )
+    text = discussion_messages(
+        load_specialist("logical"), math_task, own, [], Evidence()
+    )[-1].content
+    assert "… " + "z" * 900 in text and "a" * 10 not in text
+
+
+def test_parse_choice():
+    names = ["logical", "creative", "skeptical", "empathetic"]
+    assert parse_choice("blah\nFINAL CHOICE: **Skeptical**", names) == "skeptical"
+    assert parse_choice("I go with creative.", names) == "creative"
+    assert parse_choice("no idea", names) is None
+
+
+def test_code_evidence_lists_examples_and_groups(add_task):
+    evidence = Evidence(
+        answers={"logical": "x", "creative": "y"},
+        examples={"logical": [1, 1], "creative": [0, 1]},
+        groups=[["logical"], ["creative"]],
+    )
+    text = evidence_text(add_task, evidence, ["logical", "creative"])
+    assert "- creative: passes 0 of 1 shown examples" in text
+    assert "identical outputs" in text
+
+
+def test_endorsement_names_the_letter():
+    text = coordinator_endorsement("Y")
+    assert text.startswith("Y's reasoning holds up")
+    assert text.endswith("FINAL CHOICE: Y")
+
+
+def test_parse_choice_by_letter():
+    letters = ["W", "X", "Y", "Z"]
+    assert parse_choice("FINAL CHOICE: **y**", letters) == "Y"
+    assert parse_choice("FINAL CHOICE: none", letters, may_reject=True) == "none"
+    assert parse_choice("A careful look says I choose X.", letters) == "X"
+    assert parse_choice("FINAL ANSWER: B", letters) is None
 
 
 def test_parse_probes_from_any_block():
@@ -98,10 +144,9 @@ def test_parse_probes_from_any_block():
     assert parse_probes(text, "add", 5) == ["add(1, 2)", "add(0, 0)"]
 
 
-def test_parse_reflection_operations():
-    text = "ADD: Re-read the question\n- AGREE 2\nDISAGREE 9\nEDIT 1: Check units"
-    assert parse_reflection(text, existing=3) == [
-        ("add", None, "Re-read the question"),
-        ("agree", 2, ""),
-        ("edit", 1, "Check units"),
+def test_parse_reflection_notes():
+    text = "CASE 1: forgot to subtract\n- **CASE 2**: misread the units\nADD: ignored"
+    assert parse_reflection(text) == [
+        (1, "forgot to subtract"),
+        (2, "misread the units"),
     ]

@@ -48,22 +48,26 @@ class TestEpisodicStore:
         store.add(_entry("cherry", embedding=[0.0, 0.0, 1.0]))
 
         # Query close to "apple"
-        results = store.retrieve([0.99, 0.01, 0.0], k=1, min_similarity=0.5)
-        assert len(results) == 1
-        assert results[0].content == "apple"
+        ranked = store.ranked([0.99, 0.01, 0.0])
+        assert [e.content for _, e in ranked][0] == "apple"
+        assert ranked[0][0] > 0.99 > ranked[1][0]
 
     def test_retrieve_skips_entries_without_embeddings(self, tmp_path):
         store = EpisodicStore(tmp_path / "ep.jsonl")
         store.add(_entry("no embedding"))
         store.add(_entry("target", embedding=[1.0, 0.0]))
-        results = store.retrieve([1.0, 0.0], k=5, min_similarity=0.5)
-        assert [r.content for r in results] == ["target"]
+        assert [e.content for _, e in store.ranked([1.0, 0.0])] == ["target"]
 
-    def test_retrieve_increments_recall_count(self, tmp_path):
+    def test_ranked_covers_every_subject_and_touch_counts(self, tmp_path):
         store = EpisodicStore(tmp_path / "ep.jsonl")
-        store.add(_entry("target", embedding=[1.0, 0.0]))
-        results = store.retrieve([1.0, 0.0], k=1, min_similarity=0.5)
-        assert results[0].recall_count == 1
+        store.add(_entry("math one", embedding=[0.6, 0.8]))
+        other = _entry("code one", embedding=[1.0, 0.0])
+        other.metadata["domain"] = "code"
+        store.add(other)
+        ranked = store.ranked([1.0, 0.0])
+        assert [e.content for _, e in ranked] == ["code one", "math one"]
+        store.touch([ranked[0][1]])
+        assert ranked[0][1].recall_count == 1
 
     def test_prune_keeps_high_importance(self, tmp_path):
         store = EpisodicStore(tmp_path / "ep.jsonl")
