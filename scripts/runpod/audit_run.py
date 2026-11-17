@@ -356,7 +356,9 @@ recalls = [r for r in records if r["kind"] == "recall"]
 bad = []
 for r in recalls:
     floor = r.get("min_similarity") or 0
-    above = [c for c in r.get("candidates") or [] if c.get("similarity", 0) >= floor]
+    above = [
+        c for c in r.get("candidates") or [] if c.get("similarity", 0) >= floor + 0.001
+    ]
     if r.get("text") and not above:
         bad.append(
             f"id {r['id']}: memory shown though no candidate reached the cut-off {floor}"
