@@ -121,6 +121,45 @@ for run in (
                 + ", ".join(f"{s[:3]}={short(a, 18)!r}" for s, a in answers.items())
                 + f" -> coordinator {d.get('chosen_by')}:{d.get('chosen')} -> {'right' if v.get('passed') else 'wrong' if v else '?'}"
             )
+    starts = {e["call"]: e for e in ev if e["type"] == "call_start"}
+    ends = {e["call"]: e for e in ev if e["type"] == "call_end"}
+    shown_teams = set()
+    for d in reversed(decisions):
+        team = d.get("agent")
+        if team in shown_teams:
+            continue
+        key = (d.get("task_id"), team, d.get("attempt"))
+        calls = [
+            (starts[c], ends[c])
+            for c in starts
+            if c in ends
+            and (
+                starts[c].get("task_id"),
+                starts[c].get("agent"),
+                starts[c].get("attempt"),
+            )
+            == key
+        ]
+        if not calls:
+            continue
+        shown_teams.add(team)
+        v = verdicts.get(key, {})
+        print(
+            f"   example team {team}, {d.get('task_id')} try {d.get('attempt')} -> {'right' if v.get('passed') else 'wrong' if v else '?'}"
+        )
+        for start, end in sorted(calls, key=lambda x: x[0]["t"]):
+            model = start.get("model", "")
+            weights = (
+                "trained " + model.rsplit("-", 1)[-1]
+                if model.count("-") > 3
+                else "base"
+            )
+            reply = " ".join(str(end.get("response", "")).split())
+            print(
+                f"      {start.get('role')}/{start.get('stage')} [{weights}]: ...{reply[-150:]!r}"
+            )
+        if len(shown_teams) == 2:
+            break
     for p in pairs[-2:]:
         print(
             f"   night {p.get('cycle')} pairs team {p.get('agent')}: "
