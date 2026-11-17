@@ -390,7 +390,7 @@ for r in models:
         "coordinator",
     ]:
         user = r["request"]["messages"][-1]["content"]
-        if "Your team's previous answer" in user:
+        if "Your team's previous answer" in user.split("Notes from your memory")[0]:
             bad.append(
                 f"id {r['id']}: told a previous answer was wrong during {r['phase']}"
             )
