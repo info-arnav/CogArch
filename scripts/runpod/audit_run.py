@@ -55,7 +55,9 @@ for r in models:
     if role in SPECIALISTS:
         sysmsg = req["messages"][0]["content"]
         neutral = (
-            r.get("mode") == "specialist_neutral" or r.get("step") == "eval_no_persona"
+            r.get("mode") == "specialist_neutral"
+            or r.get("step") == "eval_no_persona"
+            or cfg["agents"].get("personas") != "full"
         )
         if not neutral and sysmsg.strip() != PERSONAS[role]["system_prompt"].strip():
             bad.append(f"id {r['id']}: {role} system prompt is not its persona")
@@ -334,7 +336,12 @@ snaps = (
     if (RUN / "memory_snapshots").exists()
     else []
 )
-if cfg["memory"]["enabled"] and len(snaps) < len({r["cycle"] for r in rounds}):
+nights = {
+    int(d.name.split("_")[1])
+    for d in (RUN / "adapters").glob("*/*/cycle_*")
+    if d.is_dir()
+}
+if cfg["memory"]["enabled"] and len(snaps) < len(nights):
     bad.append(f"snapshots {snaps}")
 check(
     "memory: one episode per problem and team, no subject labels, a snapshot each night",
@@ -372,12 +379,12 @@ check(
 val = [r for r in records if r["kind"] == "validated" and r.get("phase") == "validate"]
 bad = []
 for r in models:
-    if r.get("phase") in ("validate", "benchmarks"):
+    if r.get("phase") in ("validate", "benchmarks") and r.get("role") in [
+        *SPECIALISTS,
+        "coordinator",
+    ]:
         user = r["request"]["messages"][-1]["content"]
-        if (
-            "Your team's previous answer" in user
-            or "was wrong" in user.split("Your specialists' positions")[0]
-        ):
+        if "Your team's previous answer" in user or "rejected every answer" in user:
             bad.append(
                 f"id {r['id']}: told a previous answer was wrong during {r['phase']}"
             )
