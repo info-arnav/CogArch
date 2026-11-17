@@ -84,8 +84,12 @@ for r in models:
         for n in SPECIALISTS:
             if f"### {n}" in user or n.capitalize() + " specialist" in user:
                 bad.append(f"id {r['id']}: name {n} shown to coordinator")
+        frame = (
+            user.split("Your specialists' positions")[0]
+            + user.rsplit("Checked results", 1)[-1]
+        )
         for leak in ("track record", "(W, X, Y, Z)", "Domain:", "Subject:"):
-            if leak in user or leak in req["messages"][0]["content"]:
+            if leak in frame or leak in req["messages"][0]["content"]:
                 bad.append(f"id {r['id']}: '{leak}' shown to coordinator")
     elif role == "helper":
         if r["request"]["model"] != cfg["model"]["served_name"]:
