@@ -163,7 +163,7 @@ class Choice:
     chosen_by: str
     order: list[str]
     call: LLMCall | None
-    training_prompt: list[Message]
+    prompt: list[Message]
 
 
 class Agent:
@@ -414,7 +414,7 @@ class Agent:
 
         may_reject = self.allow_retry and self.selector == "coordinator"
         choice = await self._choose(
-            task, round2, evidence, memory_text, previous, may_reject, key, step
+            task, round2, evidence, previous, may_reject, key, step
         )
         first_choice: Choice | None = None
         retry: list[LLMCall] = []
@@ -444,7 +444,6 @@ class Agent:
                 task,
                 round2,
                 evidence,
-                memory_text,
                 previous,
                 False,
                 (*key, "again"),
@@ -475,11 +474,11 @@ class Agent:
                 r.name: specialist_messages(r.persona, task, "", previous)
                 for r in roles
             },
-            coordinator_prompt=choice.training_prompt,
+            coordinator_prompt=choice.prompt,
             coordinator_output=choice.call.response if choice.call else "",
             rejected_all=first_choice is not None,
             could_reject=may_reject and first_choice is None,
-            first_choice_prompt=first_choice.training_prompt if first_choice else [],
+            first_choice_prompt=first_choice.prompt if first_choice else [],
             first_choice_output=(
                 first_choice.call.response if first_choice and first_choice.call else ""
             ),
@@ -498,7 +497,6 @@ class Agent:
         task: Task,
         positions: list[Proposal],
         evidence: Evidence,
-        memory_text: str,
         previous: Decision | None,
         may_reject: bool,
         key: tuple,
@@ -524,30 +522,21 @@ class Agent:
                 return Choice(positions[0].specialist, "agreement", names, None, [])
             if len(leaders) == 1 and all(evidence.answers[n] for n in leaders[0]):
                 return Choice(leaders[0][0], "majority", names, None, [])
-        call = await self._call(
-            self.coordinator,
-            "decide",
-            coordinator_messages(
-                self.coordinator.persona,
-                task,
-                lettered,
-                lettered_evidence,
-                memory_text,
-                previous,
-                may_reject,
-            ),
-            *key,
-            trace=step,
-            choices=options,
-        )
-        training_prompt = coordinator_messages(
+        prompt = coordinator_messages(
             self.coordinator.persona,
             task,
             lettered,
             lettered_evidence,
-            "",
             previous,
             may_reject,
+        )
+        call = await self._call(
+            self.coordinator,
+            "decide",
+            prompt,
+            *key,
+            trace=step,
+            choices=options,
         )
         letter = parse_choice(call.response, options)
         if letter is None:
@@ -556,11 +545,9 @@ class Agent:
                 "fallback",
                 names,
                 call,
-                training_prompt,
+                prompt,
             )
-        return Choice(
-            by_label.get(letter, letter), "coordinator", names, call, training_prompt
-        )
+        return Choice(by_label.get(letter, letter), "coordinator", names, call, prompt)
 
     def _emit_round(
         self,

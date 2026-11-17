@@ -19,6 +19,7 @@ RUNS=(
   no-star:1 no-practice:1 no-replay:1
 )
 if [ -n "${RUN_LIST:-}" ]; then read -ra RUNS <<< "$RUN_LIST"; fi
+HF_HOME=/workspace/hf python3 scripts/runpod/warm_data.py > "$LOGS/warm_data.log" 2>&1
 i=0
 for run in "${RUNS[@]}"; do
   config=${run%%:*}; replicate=${run##*:}; gpu=$((FIRST + i % (GPUS - FIRST)))

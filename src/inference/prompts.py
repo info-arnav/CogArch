@@ -236,7 +236,6 @@ def coordinator_messages(
     task: Task,
     positions: list[Proposal],
     evidence: Evidence,
-    memory_text: str = "",
     previous: Decision | None = None,
     may_reject: bool = False,
 ) -> list[Message]:
@@ -267,9 +266,7 @@ def coordinator_messages(
             "Reply with only the letter of the specialist whose position is most "
             f"likely to be correct, one of: {options}."
         )
-    return _messages(
-        persona.system_prompt, _with_memory("\n\n".join(sections), memory_text)
-    )
+    return _messages(persona.system_prompt, "\n\n".join(sections))
 
 
 REJECT_ALL = "none"

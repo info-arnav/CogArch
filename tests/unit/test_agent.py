@@ -123,6 +123,13 @@ async def test_training_prompts_have_no_memory(math_task):
     d = (await make_agent(chat, memory=FakeMemory()).solve(math_task)).decisions[0]
     assert "Similar problems" in chat.calls[0]["messages"][-1].content
     assert "Similar problems" not in d.coordinator_prompt[-1].content
+    coordinator_calls = [c for c in chat.calls if c["role"] == "coordinator"]
+    assert coordinator_calls
+    assert all(
+        "Similar problems" not in c["messages"][-1].content
+        and "Notes from your memory" not in c["messages"][-1].content
+        for c in coordinator_calls
+    )
     assert all(
         "Similar problems" not in m[-1].content for m in d.specialist_prompts.values()
     )
