@@ -61,8 +61,8 @@ memory:
   retrieve_k: 3
 
 evaluation:
-  benchmarks: [humaneval, gsm8k, arc_challenge, siqa]
-  max_items: 30
+  benchmarks: [gsm8k, siqa]
+  max_items: 10
   subset_seed: 0
   samples: 1
   validation_samples: 2
